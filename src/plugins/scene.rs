@@ -4,6 +4,7 @@ use bevy_rapier3d::prelude::*;
 use crate::plugins::terrain::TerrainSampler;
 use crate::plugins::camera::OrbitCamera;
 use bevy::input::mouse::MouseButton;
+use bevy::render::camera::ClearColorConfig;
 
 #[derive(Component)]
 pub struct Ball;
@@ -86,6 +87,7 @@ fn setup_scene(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
+    assets: Res<AssetServer>,
     sampler: Res<TerrainSampler>,
 ) {
     // camera (orbit)
@@ -94,10 +96,25 @@ fn setup_scene(
     commands.spawn((
         Camera3dBundle {
             transform: cam_start,
+            camera: Camera { clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() },
             ..default()
         },
         OrbitCamera,
     ));
+
+    // Sky sphere using HDR skymap (unlit, no culling so inside is visible)
+    let sky_tex = assets.load("skymap/kloppenheim_06_puresky_1k.hdr");
+    commands.spawn(PbrBundle {
+        mesh: meshes.add(Mesh::from(Sphere { radius: 500.0 })),
+        material: mats.add(StandardMaterial {
+            base_color_texture: Some(sky_tex),
+            unlit: true,
+            cull_mode: None, // show inside of sphere
+            ..default()
+        }),
+        transform: Transform::IDENTITY,
+        ..default()
+    });
 
     // light with shadows (using default cascades)
     commands.spawn(DirectionalLightBundle {
