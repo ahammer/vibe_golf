@@ -1,25 +1,25 @@
-// Procedural vegetation spawning (trees) using a simple density field + Perlin noise mask.
+// Procedural vegetation spawning (trees) using functional compositional pipeline.
+// Updated: higher density + large scale (500–1000%) with functional decomposition.
 //
-// Approach (PCG steps mirrored from Unreal style workflows):
-// 1. Define a uniform grid over the terrain bounds.
-// 2. For each grid cell, sample a base density (constant) and modulate by Perlin noise (0..1).
-// 3. Apply additional masks:
-//      - Steep slope rejection (skip if surface normal too tilted)
-//      - Radial falloff toward inner play area if desired (light thinning near center)
-// 4. Jitter the spawn point inside the cell for variation.
-// 5. Threshold the final density to decide whether to spawn a tree.
-// 6. Randomize between multiple tree model variants and apply slight scale / rotation variance.
+// Pipeline Steps (functional style):
+//  - generate_grid_points -> iterator of base positions
+//  - jitter_point -> add randomness within a cell
+//  - sample_surface -> query height & normal
+//  - masks (slope_mask, radial_mask)
+//  - noise_density -> Perlin noise modulation
+//  - combine_density -> aggregate into final density
+//  - decide_spawn -> thresholding
+//  - build_transform -> rotation + big scale 5x–10x (500–1000%)
+//  - spawn_tree
 //
-// This keeps logic deterministic per run (but not strictly seed stable yet because of thread_rng;
-// could be switched to a seeded RNG if reproducibility is needed).
+// NOTE: For determinism you could replace thread_rng with a seeded RNG from cfg.seed.
 
 use bevy::prelude::*;
-use noise::{Perlin, NoiseFn};
-use rand::{Rng, thread_rng};
+use noise::{NoiseFn, Perlin};
+use rand::{thread_rng, Rng};
 use crate::plugins::terrain::TerrainSampler;
 
 pub struct VegetationPlugin;
-
 impl Plugin for VegetationPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_trees);
@@ -29,120 +29,164 @@ impl Plugin for VegetationPlugin {
 #[derive(Component)]
 pub struct Tree;
 
+// Configuration constants (could be made into a resource later)
+const CELL_SIZE: f32 = 4.0;          // smaller cell => higher sampling density (was 10)
+const NOISE_FREQ: f64 = 0.035;
+const BASE_DENSITY: f32 = 1.0;
+const THRESHOLD: f32 = 0.50;         // lower threshold => more spawns (was 0.58)
+const MAX_INSTANCES: usize = 3000;   // safety cap (raise from 1200)
+const MIN_SLOPE_NORMAL_Y: f32 = 0.70; // allow a bit steeper (was 0.72)
+const SCALE_MIN: f32 = 5.0;          // 500%
+const SCALE_MAX: f32 = 10.0;         // 1000%
+
+// Data structure passed through functional stages
+#[derive(Clone, Debug)]
+struct Candidate {
+    pos: Vec2,
+    height: f32,
+    normal: Vec3,
+    noise_norm: f32,
+    radial_mask: f32,
+    slope_mask: f32,
+    density: f32,
+}
+
+// Functional stages
+
+fn generate_grid_points(half: f32, cell: f32) -> impl Iterator<Item = Vec2> {
+    // Inclusive coverage
+    let steps = ((half * 2.0) / cell).ceil() as i32;
+    (-steps/2 ..= steps/2).flat_map(move |j| {
+        (-steps/2 ..= steps/2).map(move |i| {
+            Vec2::new(i as f32 * cell, j as f32 * cell)
+        })
+    })
+}
+
+fn jitter_point(mut base: Vec2, cell: f32, rng: &mut impl Rng) -> Vec2 {
+    base.x += rng.gen_range(-0.45..0.45) * cell;
+    base.y += rng.gen_range(-0.45..0.45) * cell;
+    base
+}
+
+fn sample_surface(sampler: &TerrainSampler, p: Vec2) -> (f32, Vec3) {
+    let h = sampler.height(p.x, p.y);
+    let n = sampler.normal(p.x, p.y);
+    (h, n)
+}
+
+fn slope_mask(normal: Vec3) -> f32 {
+    if normal.y < MIN_SLOPE_NORMAL_Y { 0.0 } else { normal.y.clamp(0.6, 1.0) }
+}
+
+fn radial_mask(p: Vec2, play_radius: f32) -> f32 {
+    // Keep very center clearer; fade back in toward full density
+    let clear_r = play_radius * 0.20;
+    let fade_r = play_radius * 0.65;
+    let r = p.length();
+    if r <= clear_r {
+        0.0
+    } else if r >= fade_r {
+        1.0
+    } else {
+        ((r - clear_r) / (fade_r - clear_r)).clamp(0.0, 1.0)
+    }
+}
+
+fn noise_density(perlin: &Perlin, p: Vec2) -> f32 {
+    let v = perlin.get([p.x as f64 * NOISE_FREQ, p.y as f64 * NOISE_FREQ]);
+    ((v as f32) * 0.5 + 0.5).clamp(0.0, 1.0)
+}
+
+fn combine_density(base: f32, noise_norm: f32, radial: f32, slope: f32) -> f32 {
+    base * noise_norm * radial * slope
+}
+
+fn decide_spawn(density: f32) -> bool {
+    density > THRESHOLD
+}
+
+fn random_variant(rng: &mut impl Rng) -> u8 {
+    if rng.gen_bool(0.5) { 1 } else { 2 }
+}
+
+fn build_transform(p: &Candidate, rng: &mut impl Rng) -> Transform {
+    let rot = Quat::from_rotation_y(rng.gen_range(0.0..std::f32::consts::TAU));
+    let scale_base = rng.gen_range(SCALE_MIN..SCALE_MAX);
+    let scale_variation = Vec3::new(
+        scale_base * rng.gen_range(0.95..1.05),
+        scale_base * rng.gen_range(0.95..1.10),
+        scale_base * rng.gen_range(0.95..1.05),
+    );
+    Transform {
+        translation: Vec3::new(p.pos.x, p.height, p.pos.y),
+        rotation: rot,
+        scale: scale_variation,
+    }
+}
+
 fn spawn_trees(
     mut commands: Commands,
     assets: Res<AssetServer>,
     sampler: Res<TerrainSampler>,
 ) {
-    let cfg = &sampler.clone().cfg; // (cfg not public fields? we rely on public fields)
+    let cfg = &sampler.cfg;
     let half = cfg.chunk_size * 0.5;
-
-    // Grid spacing: controls overall density baseline
-    let cell = 10.0_f32;
     let perlin = Perlin::new(cfg.seed.wrapping_add(917_331));
-
-    // Noise frequency (world units -> noise domain)
-    let noise_freq = 0.035_f64;
-    // Density threshold: only spawn if final density > threshold
-    let threshold = 0.58_f32;
-    // Base density multiplier
-    let base_density = 0.85_f32;
-
-    // Optional interior thinning near very center (keep play area clearer)
-    let clear_radius = cfg.play_radius * 0.35;
-    let fade_radius = cfg.play_radius * 0.85; // start to fully allow after this
-    let fade_range = (fade_radius - clear_radius).max(1.0);
-
     let mut rng = thread_rng();
 
-    // Iterate grid
-    let mut count = 0usize;
+    let mut spawned = 0usize;
     let mut attempts = 0usize;
-    let max_instances = 1200usize; // safety cap
 
-    let mut z = -half;
-    while z <= half {
-        let mut x = -half;
-        while x <= half {
-            attempts += 1;
-
-            // Random jitter inside the cell for less obvious grid patterns
-            let jx = rng.gen_range(-0.45..0.45) * cell;
-            let jz = rng.gen_range(-0.45..0.45) * cell;
-            let px = x + jx;
-            let pz = z + jz;
-
-            // Inside terrain bounds, sample height & normal
-            let h = sampler.height(px, pz);
-            let n = sampler.normal(px, pz);
-
-            // Reject steep slopes
-            if n.y < 0.72 {
-                x += cell;
-                continue;
-            }
-
-            // Radial thinning near center
-            let r = Vec2::new(px, pz).length();
-            let center_mask = if r <= clear_radius {
-                0.0
-            } else if r >= fade_radius {
-                1.0
-            } else {
-                ((r - clear_radius) / fade_range).clamp(0.0, 1.0)
-            };
-
-            // Noise (Perlin in [-1,1]) -> [0,1]
-            let noise_val = perlin.get([px as f64 * noise_freq, pz as f64 * noise_freq]);
-            let noise_norm = ((noise_val as f32) * 0.5 + 0.5).clamp(0.0, 1.0);
-
-            // Combine densities
-            let mut density = base_density * noise_norm * center_mask;
-
-            // Light additional modulation based on slope (flatter slightly higher)
-            density *= n.y.clamp(0.6, 1.0);
-
-            if density > threshold {
-                // Randomly pick one of the tree variants
-                let variant = if rng.gen_bool(0.5) { 1 } else { 2 };
-                let scene_path = format!("models/tree_{}.glb#Scene0", variant);
-
-                // Random uniform rotation around Y
-                let rot = Quat::from_rotation_y(rng.gen_range(0.0..std::f32::consts::TAU));
-                // Slight non-uniform scale variation
-                let scale_base = rng.gen_range(0.85..1.35);
-                let scale_variation = Vec3::new(
-                    scale_base * rng.gen_range(0.95..1.05),
-                    scale_base * rng.gen_range(0.95..1.10),
-                    scale_base * rng.gen_range(0.95..1.05),
-                );
-
-                commands.spawn((
-                    SceneBundle {
-                        scene: assets.load(scene_path),
-                        transform: Transform {
-                            translation: Vec3::new(px, h, pz),
-                            rotation: rot,
-                            scale: scale_variation,
-                        },
-                        ..default()
-                    },
-                    Tree,
-                ));
-
-                count += 1;
-                if count >= max_instances {
-                    break;
-                }
-            }
-
-            x += cell;
-        }
-        if count >= max_instances {
+    for base in generate_grid_points(half, CELL_SIZE) {
+        attempts += 1;
+        if spawned >= MAX_INSTANCES {
             break;
         }
-        z += cell;
+
+        // Jitter
+        let p = jitter_point(base, CELL_SIZE, &mut rng);
+
+        // Surface
+        let (h, n) = sample_surface(&sampler, p);
+
+        // Masks
+        let s_mask = slope_mask(n);
+        if s_mask <= 0.0 { continue; }
+        let r_mask = radial_mask(p, cfg.play_radius);
+
+        // Noise
+        let n_val = noise_density(&perlin, p);
+
+        // Density
+        let density = combine_density(BASE_DENSITY, n_val, r_mask, s_mask);
+
+        let candidate = Candidate {
+            pos: p,
+            height: h,
+            normal: n,
+            noise_norm: n_val,
+            radial_mask: r_mask,
+            slope_mask: s_mask,
+            density,
+        };
+
+        if decide_spawn(candidate.density) {
+            let variant = random_variant(&mut rng);
+            let scene_path = format!("models/tree_{}.glb#Scene0", variant);
+            let transform = build_transform(&candidate, &mut rng);
+
+            commands.spawn((
+                SceneBundle {
+                    scene: assets.load(scene_path),
+                    transform,
+                    ..default()
+                },
+                Tree,
+            ));
+            spawned += 1;
+        }
     }
 
-    info!("Vegetation: spawned {} trees after {} samples.", count, attempts);
+    info!("Vegetation: spawned {spawned} trees after {attempts} samples (cell={CELL_SIZE}, threshold={THRESHOLD}).");
 }
