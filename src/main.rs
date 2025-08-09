@@ -3,12 +3,19 @@ use bevy::math::primitives::{Cuboid, Sphere};
 use bevy_rapier3d::prelude::*;
 
 #[derive(Resource, Default)]
-struct SimState {
-    tick: u64,
-}
+struct SimState { tick: u64 }
+impl SimState { fn step(&mut self) { self.tick += 1; } }
 
-impl SimState {
-    fn step(&mut self) { self.tick += 1; }
+// Auto-play / instrumentation configuration
+#[derive(Resource)]
+struct AutoConfig {
+    run_duration_ticks: u64,   // total fixed ticks before exit
+    swing_interval_ticks: u64, // interval between scripted swings
+    base_impulse: f32,         // magnitude of impulse per swing
+    upward_factor: f32,        // Y component factor
+}
+impl Default for AutoConfig {
+    fn default() -> Self { Self { run_duration_ticks: 60*20, swing_interval_ticks: 180, base_impulse: 6.0, upward_factor: 0.15 } }
 }
 
 #[derive(Component)]
@@ -23,6 +30,7 @@ fn main() {
         .insert_resource(Time::<Fixed>::from_hz(60.0))
         .insert_resource(ClearColor(Color::srgb(0.52, 0.80, 0.92)))
         .insert_resource(SimState::default())
+    .insert_resource(AutoConfig::default())
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window { title: "Vibe Golf".into(), ..default() }),
             ..default()
@@ -33,7 +41,7 @@ fn main() {
         // scene setup
         .add_systems(Startup, (setup_scene, setup_ui))
         // fixed-tick simulation
-        .add_systems(FixedUpdate, (tick_state, maybe_nudge_ball))
+    .add_systems(FixedUpdate, (tick_state, scripted_autoplay, debug_log_each_second, exit_on_duration))
         // per-frame render-side updates
         .add_systems(Update, update_hud)
         .run();
@@ -119,19 +127,39 @@ fn tick_state(mut sim: ResMut<SimState>) {
     sim.step();
 }
 
-fn maybe_nudge_ball(
+// Periodically fire an impulse to move the ball, simulating a scripted auto-play.
+fn scripted_autoplay(
     sim: Res<SimState>,
+    cfg: Res<AutoConfig>,
     mut commands: Commands,
-    q_ball: Query<Entity, With<Ball>>,
+    q_ball: Query<(Entity, &Transform), With<Ball>>,
 ) {
-    if sim.tick == 1 {
-        if let Ok(entity) = q_ball.get_single() {
-            commands.entity(entity).insert(ExternalImpulse {
-                impulse: Vec3::new(2.0, 0.0, 3.0),
-                torque_impulse: Vec3::ZERO,
-            });
-        }
+    if sim.tick == 0 { return; }
+    if sim.tick % cfg.swing_interval_ticks != 5 { return; }
+    if let Ok((entity, transform)) = q_ball.get_single() {
+        // Aim roughly toward +X+Z direction but add slight variation based on tick
+        let angle = (sim.tick as f32 * 13.0).to_radians();
+        let dir_flat = Vec3::new(angle.cos(), 0.0, angle.sin()).normalize();
+        let impulse = dir_flat * cfg.base_impulse + Vec3::Y * (cfg.base_impulse * cfg.upward_factor);
+        commands.entity(entity).insert(ExternalImpulse { impulse, torque_impulse: Vec3::ZERO });
+        info!("AUTOPLAY swing at tick={} pos=({:.2},{:.2},{:.2}) impulse=({:.2},{:.2},{:.2})", sim.tick, transform.translation.x, transform.translation.y, transform.translation.z, impulse.x, impulse.y, impulse.z);
     }
+}
+
+// Log basic telemetry each in-game second.
+fn debug_log_each_second(
+    sim: Res<SimState>,
+    q_ball: Query<(&Transform, &Velocity), With<Ball>>,
+) {
+    if sim.tick % 60 != 0 { return; }
+    if let Ok((t, vel)) = q_ball.get_single() {
+        info!("T+{:.1}s tick={} ball=({:.2},{:.2},{:.2}) speed={:.2}", sim.tick as f32 / 60.0, sim.tick, t.translation.x, t.translation.y, t.translation.z, vel.linvel.length());
+    }
+}
+
+// Exit automatically after configured duration for automation / CI.
+fn exit_on_duration(sim: Res<SimState>, cfg: Res<AutoConfig>, mut exit: EventWriter<AppExit>) {
+    if sim.tick >= cfg.run_duration_ticks { exit.send(AppExit::Success); }
 }
 
 fn update_hud(
