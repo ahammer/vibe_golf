@@ -2,6 +2,9 @@ use bevy::prelude::*;
 use bevy::math::primitives::{Cuboid, Sphere};
 use bevy_rapier3d::prelude::*;
 
+mod screenshot;
+use screenshot::{ScreenshotPlugin, ScreenshotConfig, ScreenshotState};
+
 // Simulation timing state now tracks real elapsed seconds & frame count (no fixed 60 Hz tick).
 #[derive(Resource, Default)]
 struct SimState {
@@ -50,12 +53,14 @@ struct CameraFollow {
 }
 
 fn main() {
+    let screenshot_enabled = !std::env::args().any(|a| a == "--no-screenshot");
     App::new()
         .insert_resource(ClearColor(Color::srgb(0.52, 0.80, 0.92)))
         .insert_resource(SimState::default())
         .insert_resource(AutoConfig::default())
         .insert_resource(AutoRuntime::default())
         .insert_resource(LogState::default())
+        .insert_resource(ScreenshotConfig::new(screenshot_enabled))
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window { title: "Vibe Golf".into(), ..default() }),
             ..default()
@@ -63,6 +68,8 @@ fn main() {
         // physics
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
         // .add_plugins(RapierDebugRenderPlugin::default())
+        // screenshot capture
+        .add_plugins(ScreenshotPlugin)
         // scene setup
         .add_systems(Startup, (setup_scene, setup_ui))
         // per-frame systems (natural frame rate)
@@ -209,8 +216,18 @@ fn debug_log_each_second(
 }
 
 // Exit automatically after configured duration for automation / CI.
-fn exit_on_duration(sim: Res<SimState>, cfg: Res<AutoConfig>, mut exit: EventWriter<AppExit>) {
-    if sim.elapsed_seconds >= cfg.run_duration_seconds { exit.send(AppExit::Success); }
+fn exit_on_duration(
+    sim: Res<SimState>,
+    cfg: Res<AutoConfig>,
+    screenshot_cfg: Option<Res<ScreenshotConfig>>,
+    screenshot_state: Option<Res<ScreenshotState>>,
+    mut exit: EventWriter<AppExit>,
+) {
+    if sim.elapsed_seconds < cfg.run_duration_seconds { return; }
+    if let (Some(c), Some(state)) = (screenshot_cfg, screenshot_state) {
+        if c.enabled && !state.last_saved { return; }
+    }
+    exit.send(AppExit::Success);
 }
 
 fn update_hud(

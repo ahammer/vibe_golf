@@ -8,18 +8,7 @@ Release groupings are illustrative (can reorder if dependencies shift).
 ---
 ## Release R1 – Automation & Determinism Foundations
 
-### P0: Automated Screenshot Capture Each Run
-As a CI observer I want a screenshot artifact from each automated run so I can visually detect regressions.
-AC:
-- On normal (non-headless) runs, a PNG is saved after first fully rendered frame post-`run_duration_seconds` expiry but before process exit.
-- Default output path: `screenshots/last_run.png` (directory auto-created, overwritten each run).
-- Log line: `SCREENSHOT saved path=... size=WxH`.
-- Failure (e.g., write error) logs a warning but does not panic nor block exit.
-- Feature off by default when `--no-screenshot` CLI flag is passed (anticipate later headless mode). On by default otherwise.
-Notes / Impl:
-- Add small `screenshot.rs` module & plugin registering an `Update` system that: (a) watches `SimState.elapsed_seconds` vs `AutoConfig.run_duration_seconds`, (b) triggers once, requests render texture capture, (c) saves via `Image::save_to_png` or Bevy `ScreenshotManager` (if available in 0.14). If API mismatch, implement manual render graph capture in follow-up.
-- Defer full CLI parsing (temporary `AutoConfig { capture_screenshot: bool }`).
-- Add basic test (if feasible) that sets tiny window size & ensures file created (guard behind `cfg(not(target_os = "wasm"))`).
+<!-- P0 Automated Screenshot Capture implemented (screenshot.rs plugin, --no-screenshot flag) and removed from active backlog. -->
 
 ### P0: Reinstate Fixed 60 Hz Gameplay Tick
 As a gameplay engineer I want a deterministic fixed simulation tick separate from variable render frames to ensure reproducible physics authoring & tests.
