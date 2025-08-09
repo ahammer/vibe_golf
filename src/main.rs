@@ -16,7 +16,6 @@ pub mod plugins {
 }
 use plugins::core_sim::CoreSimPlugin;
 use plugins::scene::ScenePlugin;
-use plugins::autoplay::AutoplayPlugin;
 use plugins::hud::HudPlugin;
 use plugins::camera::CameraPlugin;
 use plugins::terrain::TerrainPlugin;

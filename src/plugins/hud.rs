@@ -1,8 +1,7 @@
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::Velocity;
 
 use crate::plugins::core_sim::SimState;
-use crate::plugins::scene::Hud;
+use crate::plugins::scene::{Hud, BallKinematic};
 
 pub struct HudPlugin;
 impl Plugin for HudPlugin {
@@ -13,11 +12,11 @@ impl Plugin for HudPlugin {
 
 fn update_hud(
     sim: Res<SimState>,
-    q_vel: Query<&Velocity>,
+    q_ball: Query<&BallKinematic>,
     mut q_text: Query<&mut Text, With<Hud>>,
 ) {
-    if let (Ok(vel), Ok(mut text)) = (q_vel.get_single(), q_text.get_single_mut()) {
-        let speed = vel.linvel.length();
+    if let (Ok(kin), Ok(mut text)) = (q_ball.get_single(), q_text.get_single_mut()) {
+        let speed = kin.vel.length();
         text.sections[0].value = format!("Tick: {} (t={:.2}s) | Speed: {:.2} m/s", sim.tick, sim.elapsed_seconds, speed);
     }
 }

@@ -8,6 +8,11 @@ pub struct Ball;
 #[derive(Component)]
 pub struct Hud;
 #[derive(Component)]
+pub struct BallKinematic {
+    pub radius: f32,
+    pub vel: Vec3,
+}
+#[derive(Component)]
 pub struct CameraFollow {
     pub distance: f32,
     pub height: f32,
@@ -18,6 +23,7 @@ pub struct ScenePlugin;
 impl Plugin for ScenePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, (setup_scene, setup_ui));
+        app.add_systems(FixedUpdate, simple_ball_physics);
     }
 }
 
@@ -41,7 +47,7 @@ fn setup_scene(
         ..default()
     });
 
-    // ball (simple vertical drop)
+    // ball (manual kinematic vertical drop with sampler collision)
     let ball_radius = 0.25;
     let x = 0.0;
     let z = 0.0;
@@ -55,8 +61,7 @@ fn setup_scene(
             ..default()
         })
         .insert(Ball)
-        .insert(RigidBody::Dynamic)
-        .insert(Collider::ball(ball_radius));
+        .insert(BallKinematic { radius: ball_radius, vel: Vec3::ZERO });
 
     // target cube
     commands
@@ -68,6 +73,26 @@ fn setup_scene(
         })
         .insert(RigidBody::Fixed)
         .insert(Collider::cuboid(0.5, 0.5, 0.5));
+}
+
+fn simple_ball_physics(
+    mut q: Query<(&mut Transform, &mut BallKinematic), With<Ball>>,
+    sampler: Res<TerrainSampler>,
+) {
+    let Ok((mut t, mut kin)) = q.get_single_mut() else { return; };
+    let dt = 1.0 / 60.0;
+    // Integrate gravity
+    kin.vel.y -= 9.81 * dt;
+    t.translation += kin.vel * dt;
+    // Terrain collision
+    let ground = sampler.height(t.translation.x, t.translation.z) + kin.radius;
+    if t.translation.y < ground {
+        t.translation.y = ground;
+        // Stop vertical motion on contact
+        if kin.vel.y < 0.0 {
+            kin.vel.y = 0.0;
+        }
+    }
 }
 
 fn setup_ui(mut commands: Commands, assets: Res<AssetServer>) {
