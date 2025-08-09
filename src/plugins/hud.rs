@@ -19,11 +19,12 @@ fn update_hud(
     if let (Ok(kin), Ok(mut text)) = (q_ball.get_single(), q_text.get_single_mut()) {
         let speed = kin.vel.length();
         if score.game_over {
-            let avg_time = sim.elapsed_seconds / score.hits.max(1) as f32;
+            let avg_time = score.final_time / score.hits.max(1) as f32;
             let avg_shots = score.shots as f32 / score.hits.max(1) as f32;
+            let best = score.high_score_time.map(|v| format!("{:.2}s", v)).unwrap_or_else(|| "--".to_string());
             text.sections[0].value = format!(
-                "GAME OVER | Time: {:.2}s | Final Holes: {} | Shots: {} | Avg Time/Hole: {:.2}s | Avg Shots/Hole: {:.2} | Press R to Reset",
-                sim.elapsed_seconds,
+                "GAME OVER | Time: {:.2}s | Best: {best} | Holes: {} | Shots: {} | Avg T/H: {:.2}s | Avg S/H: {:.2} | Press R",
+                score.final_time,
                 score.hits,
                 score.shots,
                 avg_time,

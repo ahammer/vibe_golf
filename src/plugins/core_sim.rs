@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy::time::Fixed;
 use bevy_rapier3d::prelude::{Velocity, RigidBody};
+use crate::plugins::scene::Score;
 
 // Core simulation timing & shared gameplay configuration/types.
 #[derive(Resource, Default, Debug)]
@@ -46,7 +47,14 @@ impl Plugin for CoreSimPlugin {
     }
 }
 
-fn tick_state(mut sim: ResMut<SimState>) { sim.advance_fixed(); }
+fn tick_state(mut sim: ResMut<SimState>, score: Option<Res<Score>>) {
+    if let Some(score) = score {
+        if score.game_over {
+            return; // freeze simulation timing after game over
+        }
+    }
+    sim.advance_fixed();
+}
 
 fn apply_custom_gravity(mut q: Query<(&RigidBody, &mut Velocity)>) {
     // Manual gravity because default Rapier gravity appears absent.

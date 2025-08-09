@@ -8,6 +8,9 @@ use bevy::input::mouse::MouseButton;
 use bevy::render::camera::ClearColorConfig;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
+use std::fs;
+use std::io::Write;
+use std::path::Path;
 
 #[derive(Component)]
 pub struct Ball;
@@ -74,10 +77,37 @@ pub struct Score {
     pub shots: u32,
     pub max_holes: u32,
     pub game_over: bool,
+    pub final_time: f32,
+    pub high_score_time: Option<f32>, // lowest completion time
 }
 impl Default for Score {
     fn default() -> Self {
-        Self { hits: 0, shots: 0, max_holes: 5, game_over: false }
+        Self {
+            hits: 0,
+            shots: 0,
+            max_holes: 5,
+            game_over: false,
+            final_time: 0.0,
+            high_score_time: load_high_score_time(),
+        }
+    }
+}
+
+fn high_score_file_path() -> &'static str { "high_score_time.txt" }
+
+fn load_high_score_time() -> Option<f32> {
+    let path = Path::new(high_score_file_path());
+    if let Ok(data) = fs::read_to_string(path) {
+        if let Ok(v) = data.trim().parse::<f32>() {
+            return Some(v);
+        }
+    }
+    None
+}
+
+fn save_high_score_time(t: f32) {
+    if let Ok(mut f) = fs::File::create(high_score_file_path()) {
+        let _ = writeln!(f, "{t}");
     }
 }
 
@@ -464,6 +494,7 @@ fn update_shot_indicator(
 
 fn detect_target_hits(
     mut score: ResMut<Score>,
+    sim: Res<SimState>,
     sampler: Res<TerrainSampler>,
     mut q_target: Query<&mut Transform, (With<Target>, Without<Ball>)>,
     q_ball: Query<(&Transform, &BallKinematic), With<Ball>>,
@@ -480,6 +511,16 @@ fn detect_target_hits(
         score.hits += 1;
         if score.hits >= score.max_holes {
             score.game_over = true;
+            score.final_time = sim.elapsed_seconds;
+            // Update high score (lower final_time is better)
+            let better = match score.high_score_time {
+                Some(best) => score.final_time < best,
+                None => true,
+            };
+            if better {
+                score.high_score_time = Some(score.final_time);
+                save_high_score_time(score.final_time);
+            }
             return;
         }
 
@@ -514,10 +555,11 @@ fn reset_game(
     sim.tick = 0;
     sim.elapsed_seconds = 0.0;
 
-    // Reset score
+    // Reset score (preserve high_score_time)
     score.hits = 0;
     score.shots = 0;
     score.game_over = false;
+    score.final_time = 0.0;
 
     // Reset ball position / velocity
     if let Ok((mut t, mut kin)) = q_ball.get_single_mut() {
