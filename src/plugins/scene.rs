@@ -81,16 +81,67 @@ fn simple_ball_physics(
 ) {
     let Ok((mut t, mut kin)) = q.get_single_mut() else { return; };
     let dt = 1.0 / 60.0;
-    // Integrate gravity
-    kin.vel.y -= 9.81 * dt;
+    let g = -9.81;
+
+    // Apply gravity
+    kin.vel.y += g * dt;
+
+    // Predict position
     t.translation += kin.vel * dt;
-    // Terrain collision
-    let ground = sampler.height(t.translation.x, t.translation.z) + kin.radius;
-    if t.translation.y < ground {
-        t.translation.y = ground;
-        // Stop vertical motion on contact
-        if kin.vel.y < 0.0 {
-            kin.vel.y = 0.0;
+
+    // Sample terrain height & normal under new position
+    let h = sampler.height(t.translation.x, t.translation.z);
+    let surface_y = h + kin.radius;
+
+    if t.translation.y <= surface_y {
+        // We are contacting / below surface: project onto surface
+        t.translation.y = surface_y;
+
+        // Terrain normal (for slope)
+        let n = sampler.normal(t.translation.x, t.translation.z);
+
+        // Remove any inward (into ground) velocity component
+        let vn = kin.vel.dot(n);
+        if vn < 0.0 {
+            kin.vel -= vn * n;
+        }
+
+        // Compute tangential component for sliding (vel already had normal removed if downward)
+        let tangent_vel = kin.vel - n * kin.vel.dot(n);
+
+        // Add gravity component along the plane (simulate rolling/sliding). Gravity vector is (0,g,0).
+        // Component of gravity along plane: g_parallel = g_vec - n*(g_vec·n)
+        let g_vec = Vec3::Y * g;
+        let g_parallel = g_vec - n * g_vec.dot(n);
+        kin.vel += g_parallel * dt;
+
+        // Simple rolling friction proportional to normal force (|g|) and opposite tangential direction.
+        let mut tangential = kin.vel - n * kin.vel.dot(n);
+        let speed = tangential.length();
+        if speed > 1e-5 {
+            let friction_coeff = 0.25; // tweak
+            let decel = friction_coeff * -g; // positive value
+            let drop = decel * dt;
+            if drop >= speed {
+                // Stop
+                kin.vel -= tangential;
+                tangential = Vec3::ZERO;
+            } else {
+                let new_speed = speed - drop;
+                kin.vel += (tangential.normalize() * (new_speed - speed));
+                tangential = kin.vel - n * kin.vel.dot(n);
+            }
+        }
+
+        // Visual rolling: rotate sphere based on tangential displacement
+        let disp = tangential * dt;
+        let disp_len = disp.length();
+        if disp_len > 1e-6 {
+            let axis = disp.cross(n).normalize_or_zero(); // rotation axis perpendicular to motion & normal
+            if axis.length_squared() > 0.0 {
+                let angle = disp_len / kin.radius;
+                t.rotate_local(Quat::from_axis_angle(axis, angle));
+            }
         }
     }
 }
