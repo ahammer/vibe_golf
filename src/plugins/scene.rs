@@ -3,6 +3,7 @@ use bevy::math::primitives::{Cuboid, Sphere};
 use bevy_rapier3d::prelude::*;
 use crate::plugins::terrain::TerrainSampler;
 use crate::plugins::camera::OrbitCamera;
+use crate::plugins::core_sim::SimState;
 use bevy::input::mouse::MouseButton;
 use bevy::render::camera::ClearColorConfig;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
@@ -67,9 +68,17 @@ impl Default for ShotConfig {
     }
 }
 
-#[derive(Resource, Default, Debug)]
+#[derive(Resource, Debug)]
 pub struct Score {
     pub hits: u32,
+    pub shots: u32,
+    pub max_holes: u32,
+    pub game_over: bool,
+}
+impl Default for Score {
+    fn default() -> Self {
+        Self { hits: 0, shots: 0, max_holes: 5, game_over: false }
+    }
 }
 
 pub struct ScenePlugin;
@@ -131,7 +140,7 @@ impl Plugin for ScenePlugin {
             .insert_resource(Score::default())
             .add_systems(Startup, (setup_scene, setup_ui))
             .add_systems(FixedUpdate, (simple_ball_physics, update_shot_charge, detect_target_hits))
-            .add_systems(Update, (handle_shot_input, update_shot_indicator, update_power_gauge));
+            .add_systems(Update, (handle_shot_input, update_shot_indicator, update_power_gauge, reset_game));
     }
 }
 
@@ -330,10 +339,14 @@ fn handle_shot_input(
     buttons: Res<ButtonInput<MouseButton>>,
     mut state: ResMut<ShotState>,
     cfg: Res<ShotConfig>,
+    mut score: ResMut<Score>,
     mut q_ball: Query<(&Transform, &mut BallKinematic), (With<Ball>, Without<ShotIndicator>)>,
     q_cam: Query<&Transform, (With<OrbitCamera>, Without<Ball>, Without<ShotIndicator>)>,
     mut q_indicator: Query<(&mut Transform, &mut Visibility), (With<ShotIndicator>, Without<Ball>, Without<OrbitCamera>)>,
 ) {
+    if score.game_over {
+        return;
+    }
     let Ok((ball_t, mut kin)) = q_ball.get_single_mut() else { return; };
     let Ok(cam_t) = q_cam.get_single() else { return; };
     let Ok((mut ind_t, mut vis)) = q_indicator.get_single_mut() else { return; };
@@ -358,6 +371,7 @@ fn handle_shot_input(
 
         let impulse = cfg.base_impulse * state.power.max(0.05);
         kin.vel += dir * impulse;
+        score.shots += 1;
 
         // Reset
         state.mode = ShotMode::Idle;
@@ -464,6 +478,10 @@ fn detect_target_hits(
     if dx <= half && dz <= half {
         // Hit
         score.hits += 1;
+        if score.hits >= score.max_holes {
+            score.game_over = true;
+            return;
+        }
 
         // Reposition pillar pseudo-randomly within chunk using angular increment
         // Approx chunk half-size (matches TerrainConfig::default chunk_size 384.0)
@@ -478,5 +496,46 @@ fn detect_target_hits(
         let pillar_half_height = target_t.scale.y * 0.5; // original scaling 1.0 in Y (no scale change), fallback
         let ground = sampler.height(new_x, new_z);
         target_t.translation = Vec3::new(new_x, ground + pillar_half_height, new_z);
+    }
+}
+
+fn reset_game(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut sim: ResMut<SimState>,
+    mut score: ResMut<Score>,
+    mut q_ball: Query<(&mut Transform, &mut BallKinematic), With<Ball>>,
+    mut q_target: Query<&mut Transform, (With<Target>, Without<Ball>)>,
+    sampler: Res<TerrainSampler>,
+) {
+    if !(score.game_over && keys.just_pressed(KeyCode::KeyR)) {
+        return;
+    }
+    // Reset sim state
+    sim.tick = 0;
+    sim.elapsed_seconds = 0.0;
+
+    // Reset score
+    score.hits = 0;
+    score.shots = 0;
+    score.game_over = false;
+
+    // Reset ball position / velocity
+    if let Ok((mut t, mut kin)) = q_ball.get_single_mut() {
+        let x = 0.0;
+        let z = 0.0;
+        let ground_h = sampler.height(x, z);
+        let spawn_y = ground_h + kin.radius + 10.0;
+        t.translation = Vec3::new(x, spawn_y, z);
+        t.rotation = Quat::IDENTITY;
+        kin.vel = Vec3::ZERO;
+    }
+
+    // Reset target to original pillar location
+    if let Ok(mut tt) = q_target.get_single_mut() {
+        let target_x = 0.0;
+        let target_z = 80.0;
+        let pillar_height = 16.0;
+        let ground = sampler.height(target_x, target_z);
+        tt.translation = Vec3::new(target_x, ground + pillar_height * 0.5, target_z);
     }
 }

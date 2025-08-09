@@ -27,40 +27,13 @@ Out of Scope (Explicitly Deferred):
 ## Release G1 – Core Interaction Loop
 
 ### P0: Orbit Camera (Mouse Pivot)
-As a player I want to rotate the view around the stationary ball to line up my shot.
-AC:
-- Right Mouse Drag adjusts yaw (infinite wrap) & pitch clamped (e.g. [-10°, 65°]).
-- Scroll Wheel zooms radius clamped [Rmin, Rmax] (e.g. [4.0, 18.0]).
-- Camera smoothly lerps to new transform OR snaps (config toggle).
-- Maintains a minimum clearance above terrain: if camera would clip, raise along normal or push outward.
-- Deterministic math (no frame time dependency for core state — state updates in FixedUpdate or stabilized accumulation).
-Artifacts:
-- Resource: OrbitCameraState { yaw, pitch, radius }
-- Marker component: OrbitCamera
-- Config: OrbitCameraConfig { pitch_min, pitch_max, radius_min, radius_max, zoom_speed, orbit_sensitivity }
+Done
 
 ### P0: Aim State & Charging (Mouse Hold)
-As a player I want to hold the primary mouse button to build shot power.
-AC:
-- Idle → Charging when LMB pressed AND ball speed < rest_threshold AND not in Cooldown.
-- Power ramps linearly 0→1 over charge_seconds.
-- Cancels back to Idle on ESC or RMB drag start mid-charge.
-- HUD displays power percentage & state.
-Artifacts:
-- Resource: AimState { mode: Idle|Charging|Cooldown, power: f32, last_shot_tick: u64 }
-- Config: AimConfig { charge_seconds, cooldown_seconds, rest_speed_threshold }
+Done
 
 ### P0: Shot Release & Ball Impulse
-As a player I want the shot to fire when I release the button.
-AC:
-- On LMB release while Charging: emit ShotEvent { power, dir, loft_deg }.
-- Direction = camera forward flattened (y=0) normalized.
-- Loft (initial P0): fixed small lift (e.g. 5°) OR 0 (config).
-- Ball velocity += dir_with_loft * (base_impulse * power).
-- Stroke counter increments.
-Artifacts:
-- Event: ShotEvent
-- Resource: StrokeState { strokes: u32 }
+Done
 
 ### P0: Cooldown & Re-Aim Gating
 As a player I should not be able to spam shots while ball is obviously still rolling.
