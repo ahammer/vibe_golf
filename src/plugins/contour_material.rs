@@ -75,15 +75,16 @@ fn advance_contour_time(
 
 /// Helper to build a default topographic palette (returns (colors, len))
 pub fn topo_palette() -> ([Vec4; 8], u32) {
+    // Deeper, less pastel palette (lowlands -> high)
     let cols = [
-        Vec4::new(0.05, 0.18, 0.16, 1.0), // dark low forest
-        Vec4::new(0.12, 0.32, 0.22, 1.0), // forest green
-        Vec4::new(0.30, 0.46, 0.24, 1.0), // grass
-        Vec4::new(0.55, 0.58, 0.34, 1.0), // light grass / scrub
-        Vec4::new(0.63, 0.55, 0.38, 1.0), // tan
-        Vec4::new(0.52, 0.42, 0.34, 1.0), // brown
-        Vec4::new(0.55, 0.55, 0.55, 1.0), // grey rock
-        Vec4::new(0.85, 0.85, 0.85, 1.0), // high / snow
+        Vec4::new(0.02, 0.10, 0.08, 1.0), // deep low forest
+        Vec4::new(0.05, 0.22, 0.12, 1.0), // rich forest green
+        Vec4::new(0.10, 0.36, 0.16, 1.0), // vibrant mid green
+        Vec4::new(0.20, 0.48, 0.18, 1.0), // lush grass ridge
+        Vec4::new(0.32, 0.40, 0.18, 1.0), // dry grass / shrub
+        Vec4::new(0.38, 0.28, 0.14, 1.0), // ochre / soil
+        Vec4::new(0.34, 0.30, 0.28, 1.0), // dark rock
+        Vec4::new(0.80, 0.80, 0.80, 1.0), // high / snow
     ];
     (cols, cols.len() as u32)
 }

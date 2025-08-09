@@ -83,6 +83,15 @@ fn fragment(
     let ink = vec3<f32>(0.15, 0.13, 0.11);
     base_col = mix(base_col, ink, line_m * 0.85);
 
+    // Saturation & contrast adjustments to avoid pastel look (done pre-darken so darken scales final result)
+    // Boost saturation
+    let luma = (base_col.r + base_col.g + base_col.b) / 3.0;
+    let saturation = 1.25;
+    base_col = clamp(mix(vec3<f32>(luma), base_col, saturation), vec3<f32>(0.0), vec3<f32>(1.0));
+    // Slight contrast boost
+    let contrast = 1.08;
+    base_col = clamp((base_col - vec3<f32>(0.5)) * contrast + vec3<f32>(0.5), vec3<f32>(0.0), vec3<f32>(1.0));
+
     // Apply global darken prior to lighting so shadows still modulate correctly
     base_col *= contour_extended_material.darken;
 

@@ -23,6 +23,11 @@ pub struct TerrainConfig {
     pub warp_amplitude: f32,     // domain warp displacement in world units
     pub chunk_size: f32,
     pub resolution: u32, // number of quads per side (vertices = (res+1)^2)
+    // Radial shaping to form a contained "crater" play area.
+    pub play_radius: f32,    // mostly flat inner play zone radius
+    pub rim_start: f32,      // radius where rim/mountains begin rising
+    pub rim_peak: f32,       // radius where rim reaches peak height
+    pub rim_height: f32,     // additional height added at rim_peak
 }
 impl Default for TerrainConfig {
     fn default() -> Self {
@@ -40,6 +45,10 @@ impl Default for TerrainConfig {
             warp_amplitude: 6.0,        // horizontal distortion strength
             chunk_size: 384.0,          // play area size
             resolution: 192,            // higher density for smoother surface (was 96)
+            play_radius: 70.0,          // inner mostly flat zone
+            rim_start: 90.0,            // start lifting terrain
+            rim_peak: 150.0,            // peak before outer edge (must be < chunk_size*0.5)
+            rim_height: 10.0,           // additive mountain height
         }
     }
 }
@@ -107,7 +116,34 @@ impl TerrainSampler {
             detail_sum * 0.35 +
             ridge * 0.8;
 
-        combined * cfg.amplitude
+        // Radial crater / containment shaping
+        let r = Vec2::new(x, z).length();
+        // Smoothstep helper
+        let smooth = |e0: f32, e1: f32, v: f32| {
+            let mut t = ((v - e0) / (e1 - e0)).clamp(0.0, 1.0);
+            t = t * t * (3.0 - 2.0 * t);
+            t
+        };
+
+        // Inner flatten factor (1 at center -> 0 at play_radius)
+        let inner_flat = 1.0 - (r / cfg.play_radius).clamp(0.0, 1.0);
+        // Rim rise factor (0 until rim_start -> 1 at rim_peak)
+        let rim_t = smooth(cfg.rim_start, cfg.rim_peak, r);
+
+        // Reduce noise amplitude in central play zone, boost toward rim
+        let noise_scale = 0.55 + 0.45 * rim_t;          // 0.55 inside -> 1.0 at rim
+        let flat_reduction = 0.5 * inner_flat;          // up to 50% reduction at center
+
+        let mut shaped = combined;
+        shaped *= noise_scale * (1.0 - flat_reduction);
+
+        // Add rim height (slightly ease-in exponent to sharpen rim silhouette)
+        shaped += rim_t.powf(1.25) * cfg.rim_height;
+
+        // Slight bowl depression at center (gentle negative offset)
+        shaped -= inner_flat.powf(2.0) * 1.2;
+
+        shaped * cfg.amplitude
     }
 
     /// Central-difference normal.
@@ -280,7 +316,7 @@ fn generate_single_chunk(
     ext.data.interval = 0.5;      // contour spacing (world units)
     ext.data.thickness = 0.06;    // line thickness factor (soft falloff)
     ext.data.scroll_speed = 0.10; // animation speed
-    ext.data.darken = 0.88;       // global darken
+    ext.data.darken = 0.88;       // global darken (rich but not crushed)
     ext.data.palette_len = palette_len;
     for i in 0..palette_len as usize {
         ext.data.colors[i] = palette_arr[i];
