@@ -25,7 +25,7 @@ impl Default for TerrainConfig {
             lacunarity: 2.0,
             gain: 0.5,
             chunk_size: 128.0,
-            resolution: 128,
+            resolution: 64,
         }
     }
 }

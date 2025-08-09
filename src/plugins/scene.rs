@@ -36,7 +36,7 @@ fn setup_scene(
 
     // light
     commands.spawn(DirectionalLightBundle {
-        directional_light: DirectionalLight { illuminance: 25_000.0, shadows_enabled: true, ..default() },
+        directional_light: DirectionalLight { illuminance: 25_000.0, shadows_enabled: false, ..default() },
         transform: Transform::from_xyz(10.0, 20.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
         ..default()
     });
@@ -57,9 +57,7 @@ fn setup_scene(
         .insert(Collider::ball(ball_radius))
         .insert(Friction { coefficient: 0.6, combine_rule: CoefficientCombineRule::Average })
         .insert(Restitution::coefficient(0.0))
-        .insert(Damping { linear_damping: 0.20, angular_damping: 0.05 })
-        .insert(Ccd::enabled())
-        .insert(Sleeping::disabled());
+        .insert(Damping { linear_damping: 0.20, angular_damping: 0.05 });
 
     // target cube
     commands

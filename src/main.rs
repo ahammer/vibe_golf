@@ -4,6 +4,7 @@
 
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
+use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
 
 pub mod plugins {
     pub mod core_sim;
@@ -33,7 +34,6 @@ fn main() {
             ..default()
         }))
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
-        .add_plugins(RapierDebugRenderPlugin::default())
         .add_plugins(CoreSimPlugin)      // timing + shared resources
         .add_plugins(TerrainPlugin)      // procedural terrain
         .add_plugins(ScenePlugin)        // world & entities
@@ -41,6 +41,8 @@ fn main() {
         .add_plugins(HudPlugin)          // HUD update
         .add_plugins(CameraPlugin)       // camera follow
         .add_plugins(ScreenshotPlugin)   // screenshot capture
+        .add_plugins(FrameTimeDiagnosticsPlugin)
+        .add_plugins(LogDiagnosticsPlugin::default())
         .run();
 }
 // Tests for core simulation now reside implicitly in plugin code if needed; keeping a lightweight smoke test here optional.
