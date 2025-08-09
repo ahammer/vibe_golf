@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy::math::primitives::Cuboid;
 use crate::plugins::terrain::TerrainSampler;
+use rand::prelude::*;
 use crate::plugins::camera::OrbitCamera;
 use crate::plugins::core_sim::SimState;
 use bevy::input::mouse::MouseButton;
@@ -24,6 +25,16 @@ pub struct BallKinematic {
 
 #[derive(Component)]
 pub struct Target;
+
+#[derive(Component)]
+pub struct TargetFloat {
+    ground: f32,
+    base_height: f32,
+    amplitude: f32,
+    phase: f32,
+    rot_speed: f32,
+    bounce_freq: f32,
+}
 
 #[derive(Component)]
 pub struct PowerGauge;
@@ -118,8 +129,12 @@ fn save_high_score_time(t: f32) {
 
 pub struct ScenePlugin;
 
-// Floating target vertical offset above terrain
-const TARGET_FLOAT_HEIGHT: f32 = 3.0;
+// Floating target parameters (target now floats 20–40m above ground, bobbing & rotating)
+const TARGET_BASE_HEIGHT: f32 = 30.0;      // midpoint (=> 20–40 with amplitude 10)
+const TARGET_BOB_AMPLITUDE: f32 = 10.0;    // vertical amplitude
+const TARGET_BOB_FREQ: f32 = 0.5;          // Hz
+const TARGET_ROT_SPEED: f32 = 0.4;         // radians/sec
+const TARGET_COLLIDER_RADIUS: f32 = 3.0;   // generous spherical collider radius
 
 // Generate an inside-facing (inverted) UV sphere suitable for equirectangular sky textures.
 fn generate_inverted_sphere(longitudes: u32, latitudes: u32, radius: f32) -> Mesh {
@@ -178,6 +193,7 @@ impl Plugin for ScenePlugin {
                 update_shot_indicator,
                 update_power_gauge,
                 update_power_bar,
+                update_target_motion,
                 reset_game
             ));
     }
@@ -264,23 +280,34 @@ fn setup_scene(
         })
         .insert(ShotIndicator);
 
-    // Target: floating duck model
+    // Target: floating duck model (now high floating & animated)
+    let mut rng = thread_rng();
     let target_x = 0.0;
     let target_z = 80.0;
     let target_ground = sampler.height(target_x, target_z);
+    let phase = rng.gen_range(0.0..std::f32::consts::TAU);
+    let initial_y = target_ground + TARGET_BASE_HEIGHT + TARGET_BOB_AMPLITUDE * phase.sin();
     commands
         .spawn((
             SceneBundle {
                 scene: assets.load("models/ducky.glb#Scene0"),
                 transform: Transform::from_xyz(
                     target_x,
-                    target_ground + TARGET_FLOAT_HEIGHT,
+                    initial_y,
                     target_z,
                 )
                 .with_scale(Vec3::splat(1.0)),
                 ..default()
             },
             Target,
+            TargetFloat {
+                ground: target_ground,
+                base_height: TARGET_BASE_HEIGHT,
+                amplitude: TARGET_BOB_AMPLITUDE,
+                phase,
+                rot_speed: TARGET_ROT_SPEED,
+                bounce_freq: TARGET_BOB_FREQ,
+            },
         ));
 }
 
@@ -575,18 +602,16 @@ fn detect_target_hits(
     mut score: ResMut<Score>,
     sim: Res<SimState>,
     sampler: Res<TerrainSampler>,
-    mut q_target: Query<&mut Transform, (With<Target>, Without<Ball>)>,
+    mut q_target: Query<(&mut Transform, &mut TargetFloat), (With<Target>, Without<Ball>)>,
     q_ball: Query<(&Transform, &BallKinematic), With<Ball>>,
     mut ev_hit: EventWriter<TargetHitEvent>,
     mut ev_game_over: EventWriter<GameOverEvent>,
 ) {
     let Ok((ball_t, kin)) = q_ball.get_single() else { return; };
-    let Ok(mut target_t) = q_target.get_single_mut() else { return; };
+    let Ok((mut target_t, mut target_float)) = q_target.get_single_mut() else { return; };
 
-    let half = 0.5 + kin.radius;
-    let dx = (ball_t.translation.x - target_t.translation.x).abs();
-    let dz = (ball_t.translation.z - target_t.translation.z).abs();
-    if dx <= half && dz <= half {
+    let center_dist = (ball_t.translation - target_t.translation).length();
+    if center_dist <= TARGET_COLLIDER_RADIUS + kin.radius {
         score.hits += 1;
         ev_hit.send(TargetHitEvent { pos: target_t.translation });
         if score.hits >= score.max_holes {
@@ -613,7 +638,25 @@ fn detect_target_hits(
         new_x = new_x.clamp(-chunk_half, chunk_half);
         new_z = new_z.clamp(-chunk_half, chunk_half);
         let ground = sampler.height(new_x, new_z);
-        target_t.translation = Vec3::new(new_x, ground + TARGET_FLOAT_HEIGHT, new_z);
+        target_float.ground = ground;
+        target_float.phase = rand::random::<f32>() * std::f32::consts::TAU;
+        target_t.translation = Vec3::new(new_x, ground + TARGET_BASE_HEIGHT, new_z);
+    }
+}
+
+fn update_target_motion(
+    time: Res<Time>,
+    mut q: Query<(&mut Transform, &mut TargetFloat), With<Target>>,
+) {
+    let dt = time.delta_seconds();
+    for (mut t, mut f) in &mut q {
+        // advance phase
+        f.phase += dt * f.bounce_freq * std::f32::consts::TAU;
+        // vertical bob
+        let y = f.ground + f.base_height + f.amplitude * f.phase.sin();
+        t.translation.y = y;
+        // rotation
+        t.rotate_local(Quat::from_rotation_y(f.rot_speed * dt));
     }
 }
 
@@ -622,7 +665,7 @@ fn reset_game(
     mut sim: ResMut<SimState>,
     mut score: ResMut<Score>,
     mut q_ball: Query<(&mut Transform, &mut BallKinematic), With<Ball>>,
-    mut q_target: Query<&mut Transform, (With<Target>, Without<Ball>)>,
+    mut q_target: Query<(&mut Transform, &mut TargetFloat), (With<Target>, Without<Ball>)>,
     sampler: Res<TerrainSampler>,
 ) {
     if !(score.game_over && keys.just_pressed(KeyCode::KeyR)) {
@@ -646,10 +689,16 @@ fn reset_game(
         kin.vel = Vec3::ZERO;
     }
 
-    if let Ok(mut tt) = q_target.get_single_mut() {
+    if let Ok((mut tt, mut tf)) = q_target.get_single_mut() {
         let target_x = 0.0;
         let target_z = 80.0;
         let ground = sampler.height(target_x, target_z);
-        tt.translation = Vec3::new(target_x, ground + TARGET_FLOAT_HEIGHT, target_z);
+        tf.ground = ground;
+        tf.phase = rand::random::<f32>() * std::f32::consts::TAU;
+        tt.translation = Vec3::new(
+            target_x,
+            ground + TARGET_BASE_HEIGHT + TARGET_BOB_AMPLITUDE * tf.phase.sin(),
+            target_z,
+        );
     }
 }
