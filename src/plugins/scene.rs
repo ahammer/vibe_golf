@@ -228,8 +228,9 @@ fn setup_scene(
         ..default()
     });
 
-    // Ball: meatball.glb scene. Assume original model diameter ~1.0, scale 0.5 -> radius ~0.25.
-    let ball_radius = 0.25;
+    // Ball: meatball.glb scene. Original visual model diameter ~1.0, scaled 0.5 -> visual radius ~0.25.
+    // Gameplay collider increased 5x (requested) => effective radius 1.25 while keeping visual size.
+    let ball_radius = 1.25;
     let x = 0.0;
     let z = 0.0;
     let ground_h = sampler.height(x, z);

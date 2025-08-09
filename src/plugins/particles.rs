@@ -196,12 +196,17 @@ fn spawn_dust_on_impact(
                 }
                 d.normalize()
             };
-            let speed = rng.gen_range(0.5..2.5) * (0.4 + e.intensity * 0.6);
-            let scale = rng.gen_range(0.15..0.30);
+            let speed = rng.gen_range(0.45..1.6) * (0.35 + e.intensity * 0.5); // keep mid explosive velocity
+            let scale = rng.gen_range(0.18..0.28); // larger than current, still smaller than original max 0.30
+            let angular = Vec3::new(
+                rng.gen_range(-2.2..2.2),
+                rng.gen_range(-2.2..2.2),
+                rng.gen_range(-2.2..2.2),
+            );
             commands.spawn((
                 SceneBundle {
                     scene: random_candy(&mut rng, &candy_models.candy),
-                    transform: Transform::from_translation(e.pos + Vec3::Y * 0.05)
+                    transform: Transform::from_translation(e.pos + Vec3::Y * 0.03)
                         .with_scale(Vec3::splat(scale))
                         .with_rotation(Quat::from_euler(
                             EulerRot::XYZ,
@@ -213,18 +218,14 @@ fn spawn_dust_on_impact(
                 },
                 ParticleKind::DustBurst,
                 Particle {
-                    lifetime: 5.0,
+                    lifetime: 10.0,
                     age: 0.0,
-                    fade: false, // not fading candy
+                    fade: false,
                     gravity: -9.8,
                     vel: dir * speed,
-                    angular_vel: Vec3::new(
-                        rng.gen_range(-2.0..2.0),
-                        rng.gen_range(-2.0..2.0),
-                        rng.gen_range(-2.0..2.0),
-                    ),
+                    angular_vel: angular,
                     start_scale: Vec3::splat(scale),
-                    end_scale: Vec3::splat(scale * 3.0),
+                    end_scale: Vec3::splat(scale * 2.2), // larger growth than 1.8x but less than the old 3x
                 },
             ));
         }
@@ -347,10 +348,11 @@ fn update_particles(
     let dt = time.delta_seconds();
     for (e, mut t, mut p) in &mut q {
         p.age += dt;
-        // Integrate motion
+        // Integrate motion (all manual now)
         p.vel.y += p.gravity * dt;
         t.translation += p.vel * dt;
-        // Simple angular rotation
+
+        // Angular rotation
         let ang = p.angular_vel * dt;
         if ang.length_squared() > 0.0 {
             let qrot = Quat::from_euler(EulerRot::XYZ, ang.x, ang.y, ang.z);
