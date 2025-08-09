@@ -5,6 +5,8 @@ use crate::plugins::terrain::TerrainSampler;
 use crate::plugins::camera::OrbitCamera;
 use bevy::input::mouse::MouseButton;
 use bevy::render::camera::ClearColorConfig;
+use bevy::render::mesh::{Indices, PrimitiveTopology};
+use bevy::render::render_asset::RenderAssetUsages;
 
 #[derive(Component)]
 pub struct Ball;
@@ -71,6 +73,56 @@ pub struct Score {
 }
 
 pub struct ScenePlugin;
+
+// Generate an inside-facing (inverted) UV sphere suitable for equirectangular sky textures.
+// UV mapping: u in [0,1] from -PI..PI (longitude), v in [0,1] from -PI/2..PI/2 (latitude).
+fn generate_inverted_sphere(longitudes: u32, latitudes: u32, radius: f32) -> Mesh {
+    let longs = longitudes.max(3);
+    let lats = latitudes.max(2);
+    let mut positions = Vec::with_capacity(((longs + 1) * (lats + 1)) as usize);
+    let mut uvs = Vec::with_capacity(positions.capacity());
+    let mut normals = Vec::with_capacity(positions.capacity());
+    for y in 0..=lats {
+        let v = y as f32 / lats as f32;
+        let theta = (v - 0.5) * std::f32::consts::PI; // -pi/2 .. pi/2
+        let cos_theta = theta.cos();
+        let sin_theta = theta.sin();
+        for x in 0..=longs {
+            let u = x as f32 / longs as f32;
+            let phi = (u - 0.5) * std::f32::consts::TAU; // -pi .. pi
+            let cos_phi = phi.cos();
+            let sin_phi = phi.sin();
+            let px = cos_theta * cos_phi;
+            let py = sin_theta;
+            let pz = cos_theta * sin_phi;
+            // Position on sphere
+            positions.push([radius * px, radius * py, radius * pz]);
+            // For inside-facing sphere we flip normals inward
+            normals.push([-px, -py, -pz]);
+            // Equirectangular UV (u right, v up)
+            uvs.push([u, 1.0 - v]);
+        }
+    }
+    // Indices (invert winding so inside is front-facing with default back-face culling)
+    let mut indices: Vec<u32> = Vec::with_capacity((longs * lats * 6) as usize);
+    let row_stride = longs + 1;
+    for y in 0..lats {
+        for x in 0..longs {
+            let i0 = y * row_stride + x;
+            let i1 = i0 + 1;
+            let i2 = i0 + row_stride;
+            let i3 = i2 + 1;
+            // Original (outside) would be (i0,i2,i1) and (i1,i2,i3); we swap order
+            indices.extend_from_slice(&[i0, i1, i2, i1, i3, i2]);
+        }
+    }
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
+}
 impl Plugin for ScenePlugin {
     fn build(&self, app: &mut App) {
         app
@@ -102,14 +154,15 @@ fn setup_scene(
         OrbitCamera,
     ));
 
-    // Sky sphere using HDR skymap (unlit, no culling so inside is visible)
+    // Sky sphere using HDR skymap (custom inverted sphere mesh for proper equirect mapping)
     let sky_tex = assets.load("skymap/kloppenheim_06_puresky_1k.hdr");
+    let sky_mesh = generate_inverted_sphere(64, 32, 500.0);
     commands.spawn(PbrBundle {
-        mesh: meshes.add(Mesh::from(Sphere { radius: 500.0 })),
+        mesh: meshes.add(sky_mesh),
         material: mats.add(StandardMaterial {
             base_color_texture: Some(sky_tex),
             unlit: true,
-            cull_mode: None, // show inside of sphere
+            // default back-face culling now hides the outside; inside faces are front after inversion
             ..default()
         }),
         transform: Transform::IDENTITY,
