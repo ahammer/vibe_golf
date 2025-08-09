@@ -19,8 +19,13 @@ pub struct Ball;
 pub struct Hud;
 #[derive(Component)]
 pub struct BallKinematic {
-    pub radius: f32,
+    // Gameplay collider radius (larger for forgiving collisions)
+    pub collider_radius: f32,
+    // Visual mesh radius (used to compute correct rolling rotation)
+    pub visual_radius: f32,
     pub vel: Vec3,
+    // Angular velocity in local space (radians/sec) used for smooth rolling
+    pub angular_vel: Vec3,
 }
 
 #[derive(Component)]
@@ -260,7 +265,7 @@ fn setup_scene(
                 ..default()
             },
             Ball,
-            BallKinematic { radius: ball_radius, vel: Vec3::ZERO },
+            BallKinematic { collider_radius: ball_radius, visual_radius: 0.25, vel: Vec3::ZERO, angular_vel: Vec3::ZERO },
         ));
 
     // Shot indicator (emissive beam)
@@ -324,7 +329,7 @@ fn simple_ball_physics(
     t.translation += kin.vel * dt;
 
     let h = sampler.height(t.translation.x, t.translation.z);
-    let surface_y = h + kin.radius;
+    let surface_y = h + kin.collider_radius;
 
     if t.translation.y <= surface_y {
         t.translation.y = surface_y;
@@ -363,14 +368,33 @@ fn simple_ball_physics(
             }
         }
 
-        let disp = tangential * dt;
-        let disp_len = disp.length();
-        if disp_len > 1e-6 {
-            let axis = disp.cross(n).normalize_or_zero();
+        // Derive and smooth angular velocity for visually correct rolling.
+        // A perfect no-slip roll has |omega| = speed / radius about axis = n x direction_of_travel.
+        let speed = tangential.length();
+        if speed > 1e-5 {
+            let axis = n.cross(tangential).normalize_or_zero(); // roll axis (right-hand rule)
             if axis.length_squared() > 0.0 {
-                let angle = disp_len / kin.radius;
-                t.rotate_local(Quat::from_axis_angle(axis, angle));
+                let desired_mag = speed / kin.visual_radius;
+                let desired = axis * desired_mag;
+                // Smoothly approach target spin to avoid jitter when terrain normal changes.
+                kin.angular_vel = if kin.angular_vel.length_squared() > 0.0 {
+                    kin.angular_vel.lerp(desired, 0.35)
+                } else {
+                    desired
+                };
             }
+        } else {
+            // Spin down gradually when almost stopped.
+            kin.angular_vel *= 0.85;
+            if kin.angular_vel.length_squared() < 1e-6 {
+                kin.angular_vel = Vec3::ZERO;
+            }
+        }
+        // Apply rotation from angular velocity.
+        let omega = kin.angular_vel;
+        let omega_len = omega.length();
+        if omega_len > 1e-6 {
+            t.rotate_local(Quat::from_axis_angle(omega.normalize(), omega_len * dt));
         }
     }
 }
@@ -463,7 +487,7 @@ fn handle_shot_input(
         state.mode = ShotMode::Charging;
         state.power = 0.0;
         state.rising = true;
-        ind_t.translation = ball_t.translation + Vec3::Y * (kin.radius * 0.5);
+        ind_t.translation = ball_t.translation + Vec3::Y * (kin.collider_radius * 0.5);
         *vis = Visibility::Visible;
     }
 
@@ -611,7 +635,7 @@ fn detect_target_hits(
     let Ok((mut target_t, mut target_float)) = q_target.get_single_mut() else { return; };
 
     let center_dist = (ball_t.translation - target_t.translation).length();
-    if center_dist <= TARGET_COLLIDER_RADIUS + kin.radius {
+    if center_dist <= TARGET_COLLIDER_RADIUS + kin.collider_radius {
         score.hits += 1;
         ev_hit.send(TargetHitEvent { pos: target_t.translation });
         if score.hits >= score.max_holes {
@@ -683,7 +707,7 @@ fn reset_game(
         let x = 0.0;
         let z = 0.0;
         let ground_h = sampler.height(x, z);
-        let spawn_y = ground_h + kin.radius + 10.0;
+        let spawn_y = ground_h + kin.collider_radius + 10.0;
         t.translation = Vec3::new(x, spawn_y, z);
         t.rotation = Quat::IDENTITY;
         kin.vel = Vec3::ZERO;

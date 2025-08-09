@@ -36,7 +36,8 @@ pub const BOUNCE_EFFECT_INTENSITY_MIN: f32 = 2.0;
 enum ParticleKind {
     DustAtmos,      // persistent atmospheric dust (recycled primitive spheres)
     DustBurst,      // short dust puff on ground impact (candy models now)
-    Explosion,      // bright fast particles (candy models)
+    ShotBlast,      // burst when player launches the ball
+    Explosion,      // bright fast particles (target hit)
     Confetti,       // game-over candy rain (candy models)
 }
 
@@ -120,6 +121,7 @@ impl Plugin for ParticlePlugin {
             .add_systems(Update, (
                 recycle_atmospheric_dust,
                 spawn_dust_on_impact,
+                spawn_shot_blast,
                 spawn_explosion_on_hit,
                 spawn_confetti_on_game_over,
                 update_particles,
@@ -226,6 +228,68 @@ fn spawn_dust_on_impact(
                     angular_vel: angular,
                     start_scale: Vec3::splat(scale),
                     end_scale: Vec3::splat(scale * 2.2), // larger growth than 1.8x but less than the old 3x
+                },
+            ));
+        }
+    }
+}
+
+fn spawn_shot_blast(
+    mut ev: EventReader<ShotFiredEvent>,
+    mut commands: Commands,
+    candy_models: Res<CandyModels>,
+) {
+    for e in ev.read() {
+        let mut rng = thread_rng();
+        // Scale count with shot power (power 0..1)
+        let count = (14.0 + e.power * 40.0).round() as usize;
+        for _ in 0..count {
+            // Sample direction in upper hemisphere biased slightly upward.
+            let dir = {
+                let mut d;
+                loop {
+                    d = Vec3::new(
+                        rng.gen_range(-1.0..1.0),
+                        rng.gen_range(0.0..1.0),
+                        rng.gen_range(-1.0..1.0),
+                    );
+                    if d.length_squared() > 0.05 { break; }
+                }
+                // Add mild upward bias then normalize.
+                let mut d2 = d + Vec3::Y * 0.35;
+                d2 = d2.normalize();
+                d2
+            };
+            // Speed scales with power; keep within a pleasing arc
+            let speed = rng.gen_range(4.0..8.5) * (0.45 + 0.65 * e.power);
+            let scale = rng.gen_range(0.16..0.30);
+            commands.spawn((
+                SceneBundle {
+                    scene: random_candy(&mut rng, &candy_models.candy),
+                    transform: Transform::from_translation(e.pos + Vec3::Y * 0.15)
+                        .with_scale(Vec3::splat(scale))
+                        .with_rotation(Quat::from_euler(
+                            EulerRot::XYZ,
+                            rng.gen_range(0.0..std::f32::consts::TAU),
+                            rng.gen_range(0.0..std::f32::consts::TAU),
+                            rng.gen_range(0.0..std::f32::consts::TAU),
+                        )),
+                    ..default()
+                },
+                ParticleKind::ShotBlast,
+                Particle {
+                    lifetime: rng.gen_range(0.45..0.85),
+                    age: 0.0,
+                    fade: false,
+                    gravity: -9.5,
+                    vel: dir * speed,
+                    angular_vel: Vec3::new(
+                        rng.gen_range(-5.0..5.0),
+                        rng.gen_range(-5.0..5.0),
+                        rng.gen_range(-5.0..5.0),
+                    ),
+                    start_scale: Vec3::splat(scale),
+                    end_scale: Vec3::splat(scale * rng.gen_range(1.0..1.4)),
                 },
             ));
         }
