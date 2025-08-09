@@ -27,6 +27,11 @@ fn main() {
     let screenshot_enabled = !std::env::args().any(|a| a == "--no-screenshot");
     App::new()
         .insert_resource(ClearColor(Color::srgb(0.52, 0.80, 0.92)))
+        .insert_resource(Msaa::Sample4)
+        .insert_resource(AmbientLight {
+            color: Color::srgb(0.55, 0.55, 0.60),
+            brightness: 800.0,
+        })
         .insert_resource(ScreenshotConfig::new(screenshot_enabled))
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window { title: "Vibe Golf".into(), ..default() }),

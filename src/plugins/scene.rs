@@ -40,10 +40,14 @@ fn setup_scene(
         ..default()
     }, CameraFollow { distance: 12.5, height: 6.0, lerp_factor: 0.10 }));
 
-    // light
+    // light with shadows (using default cascades)
     commands.spawn(DirectionalLightBundle {
-        directional_light: DirectionalLight { illuminance: 25_000.0, shadows_enabled: false, ..default() },
-        transform: Transform::from_xyz(10.0, 20.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
+        directional_light: DirectionalLight {
+            illuminance: 40_000.0,
+            shadows_enabled: true,
+            ..default()
+        },
+        transform: Transform::from_xyz(30.0, 60.0, 30.0).looking_at(Vec3::ZERO, Vec3::Y),
         ..default()
     });
 
