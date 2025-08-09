@@ -8,10 +8,17 @@ use bevy::render::mesh::PrimitiveTopology;
 pub struct TerrainConfig {
     pub seed: u32,
     pub amplitude: f32,
+    // Legacy fields (kept for now for potential reuse):
     pub frequency: f64,
     pub octaves: u8,
     pub lacunarity: f64,
     pub gain: f64,
+    // New multi-scale parameters:
+    pub base_frequency: f64,     // very low frequency large undulations
+    pub detail_frequency: f64,   // starting frequency for detail fBm
+    pub detail_octaves: u8,
+    pub warp_frequency: f64,     // domain warp frequency
+    pub warp_amplitude: f32,     // domain warp displacement in world units
     pub chunk_size: f32,
     pub resolution: u32, // number of quads per side (vertices = (res+1)^2)
 }
@@ -19,13 +26,18 @@ impl Default for TerrainConfig {
     fn default() -> Self {
         Self {
             seed: 1337,
-            amplitude: 3.0,
+            amplitude: 6.0,
             frequency: 0.08,
             octaves: 4,
             lacunarity: 2.0,
             gain: 0.5,
-            chunk_size: 128.0,
-            resolution: 128,
+            base_frequency: 0.010,     // broad hills
+            detail_frequency: 0.045,    // finer shapes
+            detail_octaves: 5,
+            warp_frequency: 0.020,      // warp scale
+            warp_amplitude: 6.0,        // horizontal distortion strength
+            chunk_size: 384.0,          // much larger play area
+            resolution: 96,             // lower density -> less regular grid
         }
     }
 }
@@ -51,18 +63,49 @@ impl TerrainSampler {
     }
 
     pub fn height(&self, x: f32, z: f32) -> f32 {
+        let cfg = &self.cfg;
+
+        // Domain warp (horizontal distortion)
+        let wx = self.perlin.get([
+            (x + self.seed_offset.x) as f64 * cfg.warp_frequency,
+            (z + self.seed_offset.y + 57.31) as f64 * cfg.warp_frequency,
+        ]) as f32;
+        let wz = self.perlin.get([
+            (x + self.seed_offset.x + 103.7) as f64 * cfg.warp_frequency,
+            (z + self.seed_offset.y) as f64 * cfg.warp_frequency,
+        ]) as f32;
+        let warped_x = x + wx * cfg.warp_amplitude;
+        let warped_z = z + wz * cfg.warp_amplitude;
+
+        // Large scale base
+        let base = self.perlin.get([
+            (warped_x + self.seed_offset.x) as f64 * cfg.base_frequency,
+            (warped_z + self.seed_offset.y) as f64 * cfg.base_frequency,
+        ]) as f32;
+
+        // Ridged transform of base for sharper features
+        let ridge = (1.0 - base.abs()).max(0.0).powi(2);
+
+        // Detail fractal (fBm) starting at detail_frequency
         let mut amp = 1.0;
-        let mut freq = self.cfg.frequency;
-        let mut sum = 0.0;
-        for _ in 0..self.cfg.octaves {
-            let nx = (x + self.seed_offset.x) as f64 * freq;
-            let nz = (z + self.seed_offset.y) as f64 * freq;
-            let n = self.perlin.get([nx, nz]) as f32; // in [-1,1]
-            sum += n * amp;
-            freq *= self.cfg.lacunarity;
-            amp *= self.cfg.gain as f32;
+        let mut freq = cfg.detail_frequency;
+        let mut detail_sum = 0.0;
+        for _ in 0..cfg.detail_octaves {
+            let nx = (warped_x + self.seed_offset.x) as f64 * freq;
+            let nz = (warped_z + self.seed_offset.y) as f64 * freq;
+            let n = self.perlin.get([nx, nz]) as f32;
+            detail_sum += n * amp;
+            freq *= cfg.lacunarity;
+            amp *= cfg.gain as f32;
         }
-        sum * self.cfg.amplitude
+
+        // Combine layers
+        let combined =
+            base * 0.6 +
+            detail_sum * 0.35 +
+            ridge * 0.8;
+
+        combined * cfg.amplitude
     }
 
     /// Central-difference normal.
