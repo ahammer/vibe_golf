@@ -74,7 +74,7 @@ fn capture_screenshot(
     // Capture first frame (after at least one fixed tick so initial render occurred)
     if sim.tick >= 1 && !state.first_requested {
         if let Ok((window_entity, _)) = q_window.get_single() {
-            screenshot_manager.save_screenshot_to_disk(window_entity, cfg.first_frame_path.clone());
+            let _ = screenshot_manager.save_screenshot_to_disk(window_entity, cfg.first_frame_path.clone());
             state.first_requested = true;
         }
     }
@@ -85,7 +85,7 @@ fn capture_screenshot(
     // Capture last frame after run duration reached
     if sim.elapsed_seconds >= auto.run_duration_seconds && !state.last_requested {
         if let Ok((window_entity, _)) = q_window.get_single() {
-            screenshot_manager.save_screenshot_to_disk(window_entity, cfg.last_frame_path.clone());
+            let _ = screenshot_manager.save_screenshot_to_disk(window_entity, cfg.last_frame_path.clone());
             state.last_requested = true;
         }
     }
