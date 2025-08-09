@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy::math::primitives::{Cuboid, Sphere};
 use bevy_rapier3d::prelude::*;
 use crate::plugins::terrain::TerrainSampler;
+use crate::plugins::camera::OrbitCamera;
 
 #[derive(Component)]
 pub struct Ball;
@@ -11,12 +12,6 @@ pub struct Hud;
 pub struct BallKinematic {
     pub radius: f32,
     pub vel: Vec3,
-}
-#[derive(Component)]
-pub struct CameraFollow {
-    pub distance: f32,
-    pub height: f32,
-    pub lerp_factor: f32,
 }
 
 pub struct ScenePlugin;
@@ -33,12 +28,15 @@ fn setup_scene(
     mut mats: ResMut<Assets<StandardMaterial>>,
     sampler: Res<TerrainSampler>,
 ) {
-    // camera
-    commands.spawn((Camera3dBundle {
-        transform: Transform::from_xyz(-12.0, 10.0, 18.0)
-            .looking_at(Vec3::new(0.0, 0.5, 0.0), Vec3::Y),
-        ..default()
-    }, CameraFollow { distance: 12.5, height: 6.0, lerp_factor: 0.10 }));
+    // camera (orbit)
+    commands.spawn((
+        Camera3dBundle {
+            transform: Transform::from_xyz(-12.0, 10.0, 18.0)
+                .looking_at(Vec3::new(0.0, 0.5, 0.0), Vec3::Y),
+            ..default()
+        },
+        OrbitCamera,
+    ));
 
     // light with shadows (using default cascades)
     commands.spawn(DirectionalLightBundle {
