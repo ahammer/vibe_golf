@@ -75,13 +75,13 @@ fn fragment(
     let denom = max(0.0001, contour_extended_material.max_height - contour_extended_material.min_height);
     let norm_h = clamp((in.world_position.y - contour_extended_material.min_height) / denom, 0.0, 1.0);
 
-    // Base elevation gradient
+    // Base elevation gradient (restored)
     var base_col = band_color(norm_h);
 
-    // Line overlay
+    // Line overlay with pure black contour lines for maximum contrast
     let line_m = contour_mask(in.world_position.y);
-    let ink = vec3<f32>(0.15, 0.13, 0.11);
-    base_col = mix(base_col, ink, line_m * 0.85);
+    let ink = vec3<f32>(0.0, 0.0, 0.0);
+    base_col = mix(base_col, ink, line_m);
 
     // Saturation & contrast adjustments to avoid pastel look (done pre-darken so darken scales final result)
     // Boost saturation

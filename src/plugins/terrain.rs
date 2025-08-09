@@ -254,9 +254,9 @@ fn generate_single_chunk(
     let mut ext = ContourExtension::default();
     ext.data.min_height = min_h;
     ext.data.max_height = max_h;
-    ext.data.interval = 0.5;      // contour spacing (world units)
-    ext.data.thickness = 0.06;    // line thickness factor (soft falloff)
-    ext.data.scroll_speed = 0.10; // animation speed
+    ext.data.interval = 1.6;      // wider spacing between contour bands (was 0.5)
+    ext.data.thickness = 0.70;    // even thicker lines (was 0.30)
+    ext.data.scroll_speed = 0.40; // faster motion (was 0.10)
     ext.data.darken = 0.88;       // global darken (rich but not crushed)
     ext.data.palette_len = palette_len;
     for i in 0..palette_len as usize {
