@@ -107,7 +107,6 @@ fn simple_ball_physics(
         }
 
         // Compute tangential component for sliding (vel already had normal removed if downward)
-        let tangent_vel = kin.vel - n * kin.vel.dot(n);
 
         // Add gravity component along the plane (simulate rolling/sliding). Gravity vector is (0,g,0).
         // Component of gravity along plane: g_parallel = g_vec - n*(g_vec·n)
@@ -128,7 +127,7 @@ fn simple_ball_physics(
                 tangential = Vec3::ZERO;
             } else {
                 let new_speed = speed - drop;
-                kin.vel += (tangential.normalize() * (new_speed - speed));
+                kin.vel += tangential.normalize() * (new_speed - speed);
                 tangential = kin.vel - n * kin.vel.dot(n);
             }
         }

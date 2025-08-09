@@ -25,7 +25,7 @@ impl Default for TerrainConfig {
             lacunarity: 2.0,
             gain: 0.5,
             chunk_size: 128.0,
-            resolution: 64,
+            resolution: 128,
         }
     }
 }
@@ -67,15 +67,17 @@ impl TerrainSampler {
 
     /// Central-difference normal.
     pub fn normal(&self, x: f32, z: f32) -> Vec3 {
-        let d = 0.25;
+        // Sample spacing proportional to underlying grid cell size.
+        let mut d = self.cfg.chunk_size / self.cfg.resolution as f32;
+        // Clamp to avoid too small (noise precision / fp noise) or too large (loss of detail).
+        d = d.clamp(0.05, 0.5);
         let h_l = self.height(x - d, z);
         let h_r = self.height(x + d, z);
         let h_d = self.height(x, z - d);
         let h_u = self.height(x, z + d);
         let dx = h_l - h_r;
         let dz = h_d - h_u;
-        let n = Vec3::new(dx, 2.0 * d, dz).normalize_or_zero();
-        n
+        Vec3::new(dx, 2.0 * d, dz).normalize_or_zero()
     }
 }
 
