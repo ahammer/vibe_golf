@@ -2,21 +2,38 @@ use bevy::prelude::*;
 use bevy::math::primitives::{Cuboid, Sphere};
 use bevy_rapier3d::prelude::*;
 
+// Simulation timing state now tracks real elapsed seconds & frame count (no fixed 60 Hz tick).
 #[derive(Resource, Default)]
-struct SimState { tick: u64 }
-impl SimState { fn step(&mut self) { self.tick += 1; } }
+struct SimState {
+    frames: u64,
+    elapsed_seconds: f32,
+}
+impl SimState {
+    fn advance(&mut self, delta: f32) {
+        self.frames += 1;
+        self.elapsed_seconds += delta;
+    }
+}
 
-// Auto-play / instrumentation configuration
+// Auto-play / instrumentation configuration (now time-based rather than tick-based)
 #[derive(Resource)]
 struct AutoConfig {
-    run_duration_ticks: u64,   // total fixed ticks before exit
-    swing_interval_ticks: u64, // interval between scripted swings
+    run_duration_seconds: f32,   // total seconds before exit
+    swing_interval_seconds: f32, // interval between scripted swings
     base_impulse: f32,         // magnitude of impulse per swing
     upward_factor: f32,        // Y component factor
 }
 impl Default for AutoConfig {
-    fn default() -> Self { Self { run_duration_ticks: 60*20, swing_interval_ticks: 180, base_impulse: 6.0, upward_factor: 0.15 } }
+    fn default() -> Self { Self { run_duration_seconds: 20.0, swing_interval_seconds: 3.0, base_impulse: 6.0, upward_factor: 0.15 } }
 }
+
+// Runtime auto-play state (tracks the next scheduled swing time in seconds)
+#[derive(Resource, Default)]
+struct AutoRuntime { next_swing_time: f32 }
+
+// Logging helper to ensure we only print once per integer second.
+#[derive(Resource, Default)]
+struct LogState { last_logged_second: u64 }
 
 #[derive(Component)]
 struct Ball;
@@ -24,13 +41,21 @@ struct Ball;
 #[derive(Component)]
 struct Hud;
 
+// Tag the active gameplay camera with follow params (kept minimal & deterministic).
+#[derive(Component)]
+struct CameraFollow {
+    distance: f32,     // horizontal distance behind ball
+    height: f32,       // vertical offset above ball
+    lerp_factor: f32,  // interpolation fraction each frame (render schedule)
+}
+
 fn main() {
     App::new()
-        // fixed tick for game logic
-        .insert_resource(Time::<Fixed>::from_hz(60.0))
         .insert_resource(ClearColor(Color::srgb(0.52, 0.80, 0.92)))
         .insert_resource(SimState::default())
-    .insert_resource(AutoConfig::default())
+        .insert_resource(AutoConfig::default())
+        .insert_resource(AutoRuntime::default())
+        .insert_resource(LogState::default())
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window { title: "Vibe Golf".into(), ..default() }),
             ..default()
@@ -40,10 +65,15 @@ fn main() {
         // .add_plugins(RapierDebugRenderPlugin::default())
         // scene setup
         .add_systems(Startup, (setup_scene, setup_ui))
-        // fixed-tick simulation
-    .add_systems(FixedUpdate, (tick_state, scripted_autoplay, debug_log_each_second, exit_on_duration))
-        // per-frame render-side updates
-        .add_systems(Update, update_hud)
+        // per-frame systems (natural frame rate)
+        .add_systems(Update, (
+            advance_sim_time,
+            scripted_autoplay,
+            debug_log_each_second,
+            exit_on_duration,
+            update_hud,
+            camera_follow,
+        ))
         .run();
 }
 
@@ -53,11 +83,11 @@ fn setup_scene(
     mut mats: ResMut<Assets<StandardMaterial>>,
 ) {
     // camera
-    commands.spawn(Camera3dBundle {
+    commands.spawn((Camera3dBundle {
         transform: Transform::from_xyz(-12.0, 10.0, 18.0)
             .looking_at(Vec3::new(0.0, 0.5, 0.0), Vec3::Y),
         ..default()
-    });
+    }, CameraFollow { distance: 12.5, height: 6.0, lerp_factor: 0.10 }));
 
     // light
     commands.spawn(DirectionalLightBundle {
@@ -123,43 +153,64 @@ fn setup_ui(mut commands: Commands, assets: Res<AssetServer>) {
         .insert(Hud);
 }
 
-fn tick_state(mut sim: ResMut<SimState>) {
-    sim.step();
-}
+fn advance_sim_time(mut sim: ResMut<SimState>, time: Res<Time>) { sim.advance(time.delta_seconds()); }
 
 // Periodically fire an impulse to move the ball, simulating a scripted auto-play.
 fn scripted_autoplay(
     sim: Res<SimState>,
+    mut runtime: ResMut<AutoRuntime>,
     cfg: Res<AutoConfig>,
     mut commands: Commands,
     q_ball: Query<(Entity, &Transform), With<Ball>>,
 ) {
-    if sim.tick == 0 { return; }
-    if sim.tick % cfg.swing_interval_ticks != 5 { return; }
+    if sim.elapsed_seconds < runtime.next_swing_time { return; }
     if let Ok((entity, transform)) = q_ball.get_single() {
-        // Aim roughly toward +X+Z direction but add slight variation based on tick
-        let angle = (sim.tick as f32 * 13.0).to_radians();
+        // Derive a deterministic angle from the number of swings so far
+        let swings_done = (runtime.next_swing_time / cfg.swing_interval_seconds).round() as u64;
+        let angle = (swings_done as f32 * 13.0).to_radians();
         let dir_flat = Vec3::new(angle.cos(), 0.0, angle.sin()).normalize();
         let impulse = dir_flat * cfg.base_impulse + Vec3::Y * (cfg.base_impulse * cfg.upward_factor);
         commands.entity(entity).insert(ExternalImpulse { impulse, torque_impulse: Vec3::ZERO });
-        info!("AUTOPLAY swing at tick={} pos=({:.2},{:.2},{:.2}) impulse=({:.2},{:.2},{:.2})", sim.tick, transform.translation.x, transform.translation.y, transform.translation.z, impulse.x, impulse.y, impulse.z);
+        info!(
+            "AUTOPLAY swing t={:.2}s pos=({:.2},{:.2},{:.2}) impulse=({:.2},{:.2},{:.2})",
+            sim.elapsed_seconds,
+            transform.translation.x,
+            transform.translation.y,
+            transform.translation.z,
+            impulse.x,
+            impulse.y,
+            impulse.z
+        );
     }
+    // schedule next swing
+    runtime.next_swing_time += cfg.swing_interval_seconds;
 }
 
 // Log basic telemetry each in-game second.
 fn debug_log_each_second(
     sim: Res<SimState>,
+    mut log_state: ResMut<LogState>,
     q_ball: Query<(&Transform, &Velocity), With<Ball>>,
 ) {
-    if sim.tick % 60 != 0 { return; }
+    let current_second = sim.elapsed_seconds as u64;
+    if current_second == 0 || current_second == log_state.last_logged_second { return; }
+    log_state.last_logged_second = current_second;
     if let Ok((t, vel)) = q_ball.get_single() {
-        info!("T+{:.1}s tick={} ball=({:.2},{:.2},{:.2}) speed={:.2}", sim.tick as f32 / 60.0, sim.tick, t.translation.x, t.translation.y, t.translation.z, vel.linvel.length());
+        info!(
+            "T+{}s frames={} ball=({:.2},{:.2},{:.2}) speed={:.2}",
+            current_second,
+            sim.frames,
+            t.translation.x,
+            t.translation.y,
+            t.translation.z,
+            vel.linvel.length()
+        );
     }
 }
 
 // Exit automatically after configured duration for automation / CI.
 fn exit_on_duration(sim: Res<SimState>, cfg: Res<AutoConfig>, mut exit: EventWriter<AppExit>) {
-    if sim.tick >= cfg.run_duration_ticks { exit.send(AppExit::Success); }
+    if sim.elapsed_seconds >= cfg.run_duration_seconds { exit.send(AppExit::Success); }
 }
 
 fn update_hud(
@@ -169,8 +220,33 @@ fn update_hud(
 ) {
     if let (Ok(vel), Ok(mut text)) = (q_vel.get_single(), q_text.get_single_mut()) {
         let speed = vel.linvel.length();
-        text.sections[0].value = format!("Tick: {} | Speed: {:.2} m/s", sim.tick, speed);
+        text.sections[0].value = format!("Time: {:.2}s | Speed: {:.2} m/s", sim.elapsed_seconds, speed);
     }
+}
+
+// Smoothly move & orient the camera toward the ball each frame (render schedule only).
+fn camera_follow(
+    q_ball: Query<(&Transform, Option<&Velocity>), (With<Ball>, Without<CameraFollow>)>,
+    mut q_cam: Query<(&mut Transform, &CameraFollow), Without<Ball>>,
+) {
+    let Ok((ball_t, vel_opt)) = q_ball.get_single() else { return; };
+    let Ok((mut cam_t, follow)) = q_cam.get_single_mut() else { return; };
+
+    // Determine horizontal forward direction based on velocity; fall back to current relative vector.
+    let mut forward = vel_opt
+        .and_then(|v| {
+            let horiz = Vec3::new(v.linvel.x, 0.0, v.linvel.z);
+            if horiz.length_squared() > 0.05 { Some(horiz.normalize()) } else { None }
+        })
+        .unwrap_or_else(|| {
+            let rel = (ball_t.translation - cam_t.translation) * Vec3::new(1.0, 0.0, 1.0);
+            if rel.length_squared() > 0.01 { rel.normalize() } else { Vec3::Z } // default
+        });
+    // Target camera position: behind the ball opposite forward.
+    let desired = ball_t.translation - forward * follow.distance + Vec3::Y * follow.height;
+    cam_t.translation = cam_t.translation.lerp(desired, follow.lerp_factor);
+    // Always look slightly above the ball center.
+    cam_t.look_at(ball_t.translation + Vec3::Y * 0.3, Vec3::Y);
 }
 
 #[cfg(test)]
@@ -178,9 +254,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sim_state_steps() {
+    fn sim_state_advances() {
         let mut s = SimState::default();
-        for _ in 0..5 { s.step(); }
-        assert_eq!(s.tick, 5);
+        for _ in 0..5 { s.advance(0.016); }
+        assert_eq!(s.frames, 5);
+        assert!((s.elapsed_seconds - 0.08).abs() < 1e-6);
     }
 }
