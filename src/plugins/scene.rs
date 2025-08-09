@@ -9,7 +9,7 @@ use bevy::render::camera::ClearColorConfig;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use std::fs;
-use crate::plugins::particles::{BallGroundImpactEvent, TargetHitEvent, GameOverEvent};
+use crate::plugins::particles::{BallGroundImpactEvent, TargetHitEvent, GameOverEvent, ShotFiredEvent};
 use std::io::Write;
 use std::path::Path;
 
@@ -383,6 +383,7 @@ fn handle_shot_input(
     mut q_ball: Query<(&Transform, &mut BallKinematic), (With<Ball>, Without<ShotIndicator>)>,
     q_cam: Query<&Transform, (With<OrbitCamera>, Without<Ball>, Without<ShotIndicator>)>,
     mut q_indicator: Query<(&mut Transform, &mut Visibility), (With<ShotIndicator>, Without<Ball>, Without<OrbitCamera>)>,
+    mut ev_shot: EventWriter<ShotFiredEvent>,
 ) {
     if score.game_over {
         return;
@@ -410,8 +411,10 @@ fn handle_shot_input(
         let dir = (horiz * angle.cos() + Vec3::Y * angle.sin()).normalize_or_zero();
 
         let impulse = cfg.base_impulse * state.power.max(0.05);
+        let shot_power = state.power;
         kin.vel += dir * impulse;
         score.shots += 1;
+        ev_shot.send(ShotFiredEvent { pos: ball_t.translation, power: shot_power });
 
         // Reset
         state.mode = ShotMode::Idle;

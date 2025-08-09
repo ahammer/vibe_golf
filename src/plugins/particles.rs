@@ -22,6 +22,12 @@ pub struct GameOverEvent {
     pub pos: Vec3,
 }
 
+#[derive(Event)]
+pub struct ShotFiredEvent {
+    pub pos: Vec3,
+    pub power: f32,
+}
+
 // Internal particle variants
 #[derive(Component)]
 enum ParticleKind {
@@ -114,6 +120,7 @@ impl Plugin for ParticlePlugin {
             .add_event::<BallGroundImpactEvent>()
             .add_event::<TargetHitEvent>()
             .add_event::<GameOverEvent>()
+            .add_event::<ShotFiredEvent>()
             .add_systems(Startup, setup_atmospheric_dust)
             .add_systems(Update, (
                 recycle_atmospheric_dust,
@@ -151,7 +158,7 @@ fn setup_atmospheric_dust(
     }
 }
 
-
+ 
 // We need a dedicated query; re-implement with filtering.
 fn recycle_atmospheric_dust(
     mut q: Query<&mut Transform, (With<ParticleKind>, Without<Particle>)>,

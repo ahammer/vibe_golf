@@ -14,6 +14,7 @@ pub mod plugins {
     pub mod camera;
     pub mod terrain;
     pub mod particles;
+    pub mod game_audio;
 }
 use plugins::core_sim::CoreSimPlugin;
 use plugins::scene::ScenePlugin;
@@ -21,6 +22,7 @@ use plugins::hud::HudPlugin;
 use plugins::camera::CameraPlugin;
 use plugins::terrain::TerrainPlugin;
 use plugins::particles::ParticlePlugin;
+use plugins::game_audio::GameAudioPlugin;
 
 mod screenshot;
 use screenshot::{ScreenshotPlugin, ScreenshotConfig};
@@ -43,6 +45,7 @@ fn main() {
         .add_plugins(CoreSimPlugin)      // timing + shared resources
         .add_plugins(TerrainPlugin)      // procedural terrain
         .add_plugins(ParticlePlugin)     // particle & FX systems (register events before scene systems use them)
+        .add_plugins(GameAudioPlugin)    // game audio (music + sfx)
         .add_plugins(ScenePlugin)        // world & entities
         // .add_plugins(AutoplayPlugin)     // disabled: no impulses, simple vertical drop test
         .add_plugins(HudPlugin)          // HUD update
