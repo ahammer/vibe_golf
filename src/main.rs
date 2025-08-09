@@ -17,12 +17,14 @@ pub mod plugins {
     pub mod particles;
     pub mod game_audio;
     pub mod contour_material;
+    pub mod vegetation;
 }
 use plugins::core_sim::CoreSimPlugin;
 use plugins::scene::ScenePlugin;
 use plugins::hud::HudPlugin;
 use plugins::camera::CameraPlugin;
 use plugins::terrain::TerrainPlugin;
+use plugins::vegetation::VegetationPlugin;
 use plugins::particles::ParticlePlugin;
 use plugins::game_audio::GameAudioPlugin;
 use plugins::contour_material::ContourMaterialPlugin;
@@ -48,6 +50,7 @@ fn main() {
         .add_plugins(CoreSimPlugin)      // timing + shared resources
         .add_plugins(ContourMaterialPlugin) // custom contour material (shader)
         .add_plugins(TerrainPlugin)      // procedural terrain
+        .add_plugins(VegetationPlugin)   // procedural vegetation (trees)
         .add_plugins(ParticlePlugin)     // particle & FX systems (register events before scene systems use them)
         .add_plugins(GameAudioPlugin)    // game audio (music + sfx)
         .add_plugins(ScenePlugin)        // world & entities

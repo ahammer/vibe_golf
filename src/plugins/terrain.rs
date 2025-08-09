@@ -58,7 +58,7 @@ impl Default for TerrainConfig {
 #[derive(Resource, Clone)]
 pub struct TerrainSampler {
     perlin: Perlin,
-    cfg: TerrainConfig,
+    pub cfg: TerrainConfig,
     seed_offset: Vec2,
     graph: NodeRef,
 }

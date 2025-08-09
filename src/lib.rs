@@ -12,6 +12,7 @@ pub mod plugins {
     pub mod game_audio;
     pub mod contour_material;
     pub mod terrain_graph;
+    pub mod vegetation;
 }
 pub mod screenshot;
 pub mod prelude;
