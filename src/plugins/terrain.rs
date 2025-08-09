@@ -1,9 +1,10 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
-use noise::{NoiseFn, Perlin};
+use noise::Perlin;
 use bevy::render::mesh::PrimitiveTopology;
 use bevy::pbr::{ExtendedMaterial, StandardMaterial};
 use crate::plugins::contour_material::{ContourExtension, topo_palette};
+use crate::plugins::terrain_graph::{build_terrain_graph, NodeRef, GraphContext};
 
 /// Configuration for procedural terrain height sampling & mesh generation.
 #[derive(Resource, Clone)]
@@ -59,6 +60,7 @@ pub struct TerrainSampler {
     perlin: Perlin,
     cfg: TerrainConfig,
     seed_offset: Vec2,
+    graph: NodeRef,
 }
 
 impl TerrainSampler {
@@ -66,84 +68,24 @@ impl TerrainSampler {
         // Derive offsets from seed to avoid symmetry.
         let sx = (cfg.seed.wrapping_mul(747796405) ^ 0xA5A5A5A5) as f32 * 0.00123;
         let sz = (cfg.seed.wrapping_mul(2891336453) ^ 0x5A5A5A5A) as f32 * 0.00097;
+        let graph = build_terrain_graph(&cfg);
         Self {
             perlin: Perlin::new(cfg.seed),
             cfg,
             seed_offset: Vec2::new(sx, sz),
+            graph,
         }
     }
 
     pub fn height(&self, x: f32, z: f32) -> f32 {
-        let cfg = &self.cfg;
-
-        // Domain warp (horizontal distortion)
-        let wx = self.perlin.get([
-            (x + self.seed_offset.x) as f64 * cfg.warp_frequency,
-            (z + self.seed_offset.y + 57.31) as f64 * cfg.warp_frequency,
-        ]) as f32;
-        let wz = self.perlin.get([
-            (x + self.seed_offset.x + 103.7) as f64 * cfg.warp_frequency,
-            (z + self.seed_offset.y) as f64 * cfg.warp_frequency,
-        ]) as f32;
-        let warped_x = x + wx * cfg.warp_amplitude;
-        let warped_z = z + wz * cfg.warp_amplitude;
-
-        // Large scale base
-        let base = self.perlin.get([
-            (warped_x + self.seed_offset.x) as f64 * cfg.base_frequency,
-            (warped_z + self.seed_offset.y) as f64 * cfg.base_frequency,
-        ]) as f32;
-
-        // Ridged transform of base for sharper features
-        let ridge = (1.0 - base.abs()).max(0.0).powi(2);
-
-        // Detail fractal (fBm) starting at detail_frequency
-        let mut amp = 1.0;
-        let mut freq = cfg.detail_frequency;
-        let mut detail_sum = 0.0;
-        for _ in 0..cfg.detail_octaves {
-            let nx = (warped_x + self.seed_offset.x) as f64 * freq;
-            let nz = (warped_z + self.seed_offset.y) as f64 * freq;
-            let n = self.perlin.get([nx, nz]) as f32;
-            detail_sum += n * amp;
-            freq *= cfg.lacunarity;
-            amp *= cfg.gain as f32;
-        }
-
-        // Combine layers
-        let combined =
-            base * 0.6 +
-            detail_sum * 0.35 +
-            ridge * 0.8;
-
-        // Radial crater / containment shaping
-        let r = Vec2::new(x, z).length();
-        // Smoothstep helper
-        let smooth = |e0: f32, e1: f32, v: f32| {
-            let mut t = ((v - e0) / (e1 - e0)).clamp(0.0, 1.0);
-            t = t * t * (3.0 - 2.0 * t);
-            t
+        // Evaluate graph; graph returns pre-amplitude height (includes crater shaping & warping)
+        let ctx = GraphContext {
+            perlin: &self.perlin,
+            cfg: &self.cfg,
+            seed_offset: self.seed_offset,
         };
-
-        // Inner flatten factor (1 at center -> 0 at play_radius)
-        let inner_flat = 1.0 - (r / cfg.play_radius).clamp(0.0, 1.0);
-        // Rim rise factor (0 until rim_start -> 1 at rim_peak)
-        let rim_t = smooth(cfg.rim_start, cfg.rim_peak, r);
-
-        // Reduce noise amplitude in central play zone, boost toward rim
-        let noise_scale = 0.55 + 0.45 * rim_t;          // 0.55 inside -> 1.0 at rim
-        let flat_reduction = 0.5 * inner_flat;          // up to 50% reduction at center
-
-        let mut shaped = combined;
-        shaped *= noise_scale * (1.0 - flat_reduction);
-
-        // Add rim height (slightly ease-in exponent to sharpen rim silhouette)
-        shaped += rim_t.powf(1.25) * cfg.rim_height;
-
-        // Slight bowl depression at center (gentle negative offset)
-        shaped -= inner_flat.powf(2.0) * 1.2;
-
-        shaped * cfg.amplitude
+        let base = self.graph.sample(x, z, &ctx);
+        base * self.cfg.amplitude
     }
 
     /// Central-difference normal.
@@ -265,7 +207,6 @@ fn generate_single_chunk(
             let contour_interval = 1.0_f32;
             let contour_thickness = 0.12_f32; // fraction of interval for dark line
             let h_mod = (h / contour_interval).fract();
-            let dist_to_line = (h_mod - 0.5).abs(); // 0 at half interval edges -> shift to nearest line
             // Distance to nearest integer (line at multiples): use min(h_mod, 1-h_mod)
             let d_line = h_mod.min(1.0 - h_mod);
             // Line strength (1 at center of line, 0 away)

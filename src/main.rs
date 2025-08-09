@@ -13,6 +13,7 @@ pub mod plugins {
     pub mod hud;
     pub mod camera;
     pub mod terrain;
+    pub mod terrain_graph;
     pub mod particles;
     pub mod game_audio;
     pub mod contour_material;
