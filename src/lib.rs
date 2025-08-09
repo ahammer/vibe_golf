@@ -7,6 +7,7 @@ pub mod plugins {
     pub mod autoplay;
     pub mod hud;
     pub mod camera;
+    pub mod terrain;
 }
 pub mod screenshot;
 pub mod prelude;

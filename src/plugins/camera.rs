@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;
 use crate::plugins::scene::{Ball, CameraFollow};
+use crate::plugins::terrain::TerrainSampler;
 
 pub struct CameraPlugin;
 impl Plugin for CameraPlugin {
@@ -12,6 +13,7 @@ impl Plugin for CameraPlugin {
 fn camera_follow(
     q_ball: Query<(&Transform, Option<&Velocity>), (With<Ball>, Without<CameraFollow>)>,
     mut q_cam: Query<(&mut Transform, &CameraFollow), Without<Ball>>,
+    sampler: Option<Res<TerrainSampler>>,
 ) {
     let Ok((ball_t, vel_opt)) = q_ball.get_single() else { return; };
     let Ok((mut cam_t, follow)) = q_cam.get_single_mut() else { return; };
@@ -26,7 +28,17 @@ fn camera_follow(
             if rel.length_squared() > 0.01 { rel.normalize() } else { Vec3::Z }
         });
 
-    let desired = ball_t.translation - forward * follow.distance + Vec3::Y * follow.height;
+    let mut desired = ball_t.translation - forward * follow.distance + Vec3::Y * follow.height;
+
+    // Terrain clearance if sampler exists (terrain plugin loaded)
+    if let Some(s) = sampler {
+        let ground_y = s.height(desired.x, desired.z);
+        let min_clearance = 1.5;
+        if desired.y < ground_y + min_clearance {
+            desired.y = ground_y + min_clearance;
+        }
+    }
+
     cam_t.translation = cam_t.translation.lerp(desired, follow.lerp_factor);
     cam_t.look_at(ball_t.translation + Vec3::Y * 0.3, Vec3::Y);
 }

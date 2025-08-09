@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy::math::primitives::{Cuboid, Sphere};
 use bevy_rapier3d::prelude::*;
+use crate::plugins::terrain::TerrainSampler;
 
 #[derive(Component)]
 pub struct Ball;
@@ -24,6 +25,7 @@ fn setup_scene(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
+    sampler: Res<TerrainSampler>,
 ) {
     // camera
     commands.spawn((Camera3dBundle {
@@ -39,25 +41,15 @@ fn setup_scene(
         ..default()
     });
 
-    // ground
-    let ground_size = Vec3::new(200.0, 0.2, 200.0);
-    commands
-        .spawn(PbrBundle {
-            mesh: meshes.add(Mesh::from(Cuboid::from_size(ground_size))),
-            material: mats.add(Color::srgb(0.25, 0.55, 0.25)),
-            transform: Transform::from_xyz(0.0, -0.1, 0.0),
-            ..default()
-        })
-        .insert(RigidBody::Fixed)
-        .insert(Collider::cuboid(ground_size.x * 0.5, ground_size.y * 0.5, ground_size.z * 0.5));
-
     // ball
     let ball_radius = 0.25;
+    let base_h = sampler.height(-5.0, -5.0);
+    let spawn_y = base_h + ball_radius + 0.25;
     commands
         .spawn(PbrBundle {
             mesh: meshes.add(Mesh::from(Sphere { radius: ball_radius })),
             material: mats.add(Color::srgb(0.95, 0.95, 0.95)),
-            transform: Transform::from_xyz(-5.0, 1.0, -5.0),
+            transform: Transform::from_xyz(-5.0, spawn_y, -5.0),
             ..default()
         })
         .insert(Ball)

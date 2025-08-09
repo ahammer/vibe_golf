@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 bevy = { version = "0.14", default-features = true, features = ["bevy_asset", "bevy_winit", "bevy_render", "bevy_pbr", "png"] }
 bevy_rapier3d = { version = "0.27", default-features = true }
+noise = "0.8"

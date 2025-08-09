@@ -11,12 +11,14 @@ pub mod plugins {
     pub mod autoplay;
     pub mod hud;
     pub mod camera;
+    pub mod terrain;
 }
 use plugins::core_sim::CoreSimPlugin;
 use plugins::scene::ScenePlugin;
 use plugins::autoplay::AutoplayPlugin;
 use plugins::hud::HudPlugin;
 use plugins::camera::CameraPlugin;
+use plugins::terrain::TerrainPlugin;
 
 mod screenshot;
 use screenshot::{ScreenshotPlugin, ScreenshotConfig};
@@ -33,6 +35,7 @@ fn main() {
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
         // .add_plugins(RapierDebugRenderPlugin::default())
         .add_plugins(CoreSimPlugin)      // timing + shared resources
+        .add_plugins(TerrainPlugin)      // procedural terrain
         .add_plugins(ScenePlugin)        // world & entities
         .add_plugins(AutoplayPlugin)     // scripted swings & telemetry
         .add_plugins(HudPlugin)          // HUD update
