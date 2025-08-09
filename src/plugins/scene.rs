@@ -64,14 +64,20 @@ impl Default for ShotConfig {
     }
 }
 
+#[derive(Resource, Default, Debug)]
+pub struct Score {
+    pub hits: u32,
+}
+
 pub struct ScenePlugin;
 impl Plugin for ScenePlugin {
     fn build(&self, app: &mut App) {
         app
             .insert_resource(ShotState::default())
             .insert_resource(ShotConfig::default())
+            .insert_resource(Score::default())
             .add_systems(Startup, (setup_scene, setup_ui))
-            .add_systems(FixedUpdate, (simple_ball_physics, update_shot_charge))
+            .add_systems(FixedUpdate, (simple_ball_physics, update_shot_charge, detect_target_hits))
             .add_systems(Update, (handle_shot_input, update_shot_indicator, update_power_gauge));
     }
 }
@@ -369,5 +375,38 @@ fn update_shot_indicator(
     let from = Vec3::Z;
     if dir.length_squared() > 0.0 {
         ind_t.rotation = Quat::from_rotation_arc(from, dir);
+    }
+}
+
+fn detect_target_hits(
+    mut score: ResMut<Score>,
+    sampler: Res<TerrainSampler>,
+    mut q_target: Query<&mut Transform, (With<Target>, Without<Ball>)>,
+    q_ball: Query<(&Transform, &BallKinematic), With<Ball>>,
+) {
+    let Ok((ball_t, kin)) = q_ball.get_single() else { return; };
+    let Ok(mut target_t) = q_target.get_single_mut() else { return; };
+
+    // Pillar dimensions: 1.0 x pillar_height x 1.0; half extents 0.5,0.5 horizontally
+    let half = 0.5 + kin.radius;
+    let dx = (ball_t.translation.x - target_t.translation.x).abs();
+    let dz = (ball_t.translation.z - target_t.translation.z).abs();
+    if dx <= half && dz <= half {
+        // Hit
+        score.hits += 1;
+
+        // Reposition pillar pseudo-randomly within chunk using angular increment
+        // Approx chunk half-size (matches TerrainConfig::default chunk_size 384.0)
+        let chunk_half = 384.0 * 0.5 - 5.0;
+        let angle_deg = (score.hits as f32 * 137.0) % 360.0;
+        let angle = angle_deg.to_radians();
+        let ring = 60.0 + (score.hits % 5) as f32 * 15.0;
+        let mut new_x = ring * angle.cos();
+        let mut new_z = ring * angle.sin();
+        new_x = new_x.clamp(-chunk_half, chunk_half);
+        new_z = new_z.clamp(-chunk_half, chunk_half);
+        let pillar_half_height = target_t.scale.y * 0.5; // original scaling 1.0 in Y (no scale change), fallback
+        let ground = sampler.height(new_x, new_z);
+        target_t.translation = Vec3::new(new_x, ground + pillar_half_height, new_z);
     }
 }
