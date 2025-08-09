@@ -41,23 +41,22 @@ fn setup_scene(
         ..default()
     });
 
-    // ball
+    // ball (simple vertical drop)
     let ball_radius = 0.25;
-    let base_h = sampler.height(-5.0, -5.0);
-    let spawn_y = base_h + ball_radius + 0.25;
+    let x = 0.0;
+    let z = 0.0;
+    let ground_h = sampler.height(x, z);
+    let spawn_y = ground_h + ball_radius + 10.0;
     commands
         .spawn(PbrBundle {
             mesh: meshes.add(Mesh::from(Sphere { radius: ball_radius })),
             material: mats.add(Color::srgb(0.95, 0.95, 0.95)),
-            transform: Transform::from_xyz(-5.0, spawn_y, -5.0),
+            transform: Transform::from_xyz(x, spawn_y, z),
             ..default()
         })
         .insert(Ball)
         .insert(RigidBody::Dynamic)
-        .insert(Collider::ball(ball_radius))
-        .insert(Friction { coefficient: 0.6, combine_rule: CoefficientCombineRule::Average })
-        .insert(Restitution::coefficient(0.0))
-        .insert(Damping { linear_damping: 0.20, angular_damping: 0.05 });
+        .insert(Collider::ball(ball_radius));
 
     // target cube
     commands

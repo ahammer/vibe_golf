@@ -37,7 +37,7 @@ fn main() {
         .add_plugins(CoreSimPlugin)      // timing + shared resources
         .add_plugins(TerrainPlugin)      // procedural terrain
         .add_plugins(ScenePlugin)        // world & entities
-        .add_plugins(AutoplayPlugin)     // scripted swings & telemetry
+        // .add_plugins(AutoplayPlugin)     // disabled: no impulses, simple vertical drop test
         .add_plugins(HudPlugin)          // HUD update
         .add_plugins(CameraPlugin)       // camera follow
         .add_plugins(ScreenshotPlugin)   // screenshot capture
