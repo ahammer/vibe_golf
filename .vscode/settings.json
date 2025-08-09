@@ -1,0 +1,30 @@
+{
+  // Enable GitHub Copilot globally in this workspace
+  "github.copilot.enable": {
+    "*": true,
+    "plaintext": true,
+    "markdown": true,
+    "scminput": false
+  },
+  // Show inline suggestions as you type
+  "github.copilot.inlineSuggest.enable": true,
+  // Enable chat (if extension installed)
+  "github.copilot.chat.enable": true,
+  // Reduce delay before suggestions appear (ms)
+  "editor.inlineSuggest.showToolbar": "always",
+  // Accept first suggestion with Tab (default behavior already)
+  "editor.acceptSuggestionOnEnter": "on",
+  // Optional: automatically trigger suggestions on every keystroke
+  "editor.quickSuggestions": {
+    "other": true,
+    "comments": true,
+    "strings": true
+  },
+  // Optional: make inline suggestions less transparent
+  "editor.inlineSuggest.fontSize": 14,
+  "editor.inlineSuggest.fontFamily": "default",
+  // Copilot suggestion debounce (lower = sooner); not officially documented, kept conservative
+  // "github.copilot.suggestionDebounceInterval": 150,
+  // Telemetry opt-out (personal preference)
+  "telemetry.telemetryLevel": "off"
+}
