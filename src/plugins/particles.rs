@@ -48,6 +48,8 @@ struct Particle {
     gravity: f32,
     vel: Vec3,
     angular_vel: Vec3,
+    start_scale: Vec3,
+    end_scale: Vec3,
 }
 
 #[derive(Resource)]
@@ -211,16 +213,18 @@ fn spawn_dust_on_impact(
                 },
                 ParticleKind::DustBurst,
                 Particle {
-                    lifetime: rng.gen_range(0.6..1.2),
+                    lifetime: 5.0,
                     age: 0.0,
                     fade: false, // not fading candy
-                    gravity: -2.5,
+                    gravity: -9.8,
                     vel: dir * speed,
                     angular_vel: Vec3::new(
                         rng.gen_range(-2.0..2.0),
                         rng.gen_range(-2.0..2.0),
                         rng.gen_range(-2.0..2.0),
                     ),
+                    start_scale: Vec3::splat(scale),
+                    end_scale: Vec3::splat(scale * 3.0),
                 },
             ));
         }
@@ -272,6 +276,8 @@ fn spawn_explosion_on_hit(
                         rng.gen_range(-6.0..6.0),
                         rng.gen_range(-6.0..6.0),
                     ),
+                    start_scale: Vec3::splat(scale),
+                    end_scale: Vec3::splat(scale),
                 },
             ));
         }
@@ -324,6 +330,8 @@ fn spawn_confetti_on_game_over(
                         rng.gen_range(-3.0..3.0),
                         rng.gen_range(-3.0..3.0),
                     ),
+                    start_scale: Vec3::splat(scale),
+                    end_scale: Vec3::splat(scale),
                 },
             ));
         }
@@ -348,6 +356,10 @@ fn update_particles(
             let qrot = Quat::from_euler(EulerRot::XYZ, ang.x, ang.y, ang.z);
             t.rotate_local(qrot);
         }
+        // Scale over lifetime (dust burst expands, others unchanged if start==end)
+        let progress = (p.age / p.lifetime).clamp(0.0, 1.0);
+        t.scale = p.start_scale.lerp(p.end_scale, progress);
+
         if p.age >= p.lifetime {
             commands.entity(e).despawn_recursive();
             continue;
