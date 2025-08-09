@@ -4,7 +4,7 @@
 // Pipeline Steps (functional style):
 //  - generate_grid_points -> iterator of base positions
 //  - jitter_point -> add randomness within a cell
-//  - sample_surface -> query height & normal
+//  - sample_surface -> query height & normal (expensive, deferred until after cheap tests)
 //  - masks (slope_mask, radial_mask)
 //  - noise_density -> Perlin noise modulation
 //  - combine_density -> aggregate into final density
@@ -12,24 +12,40 @@
 //  - build_transform -> rotation + big scale 5x–10x (500–1000%)
 //  - spawn_tree
 //
+// Added (optimization stage):
+//  - Early rejection before height/normal sampling
+//  - Distance based visibility culling (with hysteresis + timed updates)
+//
 // NOTE: For determinism you could replace thread_rng with a seeded RNG from cfg.seed.
 
 use bevy::prelude::*;
 use noise::{NoiseFn, Perlin};
 use rand::{thread_rng, Rng};
 use crate::plugins::terrain::TerrainSampler;
+use crate::plugins::scene::Ball;
 
 pub struct VegetationPlugin;
 impl Plugin for VegetationPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_trees);
+        // Insert culling config/state + spawning + runtime culling system
+        let cull_cfg = VegetationCullingConfig::default();
+        let interval = cull_cfg.update_interval;
+        app.insert_resource(cull_cfg)
+            .insert_resource(VegetationCullingState {
+                timer: Timer::from_seconds(interval, TimerMode::Repeating),
+            })
+            .add_systems(Startup, spawn_trees)
+            .add_systems(Update, cull_trees);
     }
 }
 
 #[derive(Component)]
 pub struct Tree;
 
-// Configuration constants (could be made into a resource later)
+#[derive(Component)]
+struct TreeCulled(bool); // true if currently hidden
+
+// Runtime-configurable (Resource later if needed)
 const CELL_SIZE: f32 = 4.0;          // smaller cell => higher sampling density (was 10)
 const NOISE_FREQ: f64 = 0.035;
 const BASE_DENSITY: f32 = 1.0;
@@ -38,6 +54,28 @@ const MAX_INSTANCES: usize = 3000;   // safety cap (raise from 1200)
 const MIN_SLOPE_NORMAL_Y: f32 = 0.70; // allow a bit steeper (was 0.72)
 const SCALE_MIN: f32 = 5.0;          // 500%
 const SCALE_MAX: f32 = 10.0;         // 1000%
+
+// Distance culling configuration
+#[derive(Resource)]
+pub struct VegetationCullingConfig {
+    pub max_distance: f32,    // soft visibility radius for trees
+    pub hysteresis: f32,      // +/- band to avoid popping
+    pub update_interval: f32, // seconds between culling passes
+}
+impl Default for VegetationCullingConfig {
+    fn default() -> Self {
+        Self {
+            max_distance: 180.0,
+            hysteresis: 12.0,
+            update_interval: 0.4,
+        }
+    }
+}
+
+#[derive(Resource)]
+struct VegetationCullingState {
+    timer: Timer,
+}
 
 // Data structure passed through functional stages
 #[derive(Clone, Debug)]
@@ -56,10 +94,8 @@ struct Candidate {
 fn generate_grid_points(half: f32, cell: f32) -> impl Iterator<Item = Vec2> {
     // Inclusive coverage
     let steps = ((half * 2.0) / cell).ceil() as i32;
-    (-steps/2 ..= steps/2).flat_map(move |j| {
-        (-steps/2 ..= steps/2).map(move |i| {
-            Vec2::new(i as f32 * cell, j as f32 * cell)
-        })
+    (-steps / 2..=steps / 2).flat_map(move |j| {
+        (-steps / 2..=steps / 2).map(move |i| Vec2::new(i as f32 * cell, j as f32 * cell))
     })
 }
 
@@ -76,7 +112,11 @@ fn sample_surface(sampler: &TerrainSampler, p: Vec2) -> (f32, Vec3) {
 }
 
 fn slope_mask(normal: Vec3) -> f32 {
-    if normal.y < MIN_SLOPE_NORMAL_Y { 0.0 } else { normal.y.clamp(0.6, 1.0) }
+    if normal.y < MIN_SLOPE_NORMAL_Y {
+        0.0
+    } else {
+        normal.y.clamp(0.6, 1.0)
+    }
 }
 
 fn radial_mask(p: Vec2, play_radius: f32) -> f32 {
@@ -107,7 +147,11 @@ fn decide_spawn(density: f32) -> bool {
 }
 
 fn random_variant(rng: &mut impl Rng) -> u8 {
-    if rng.gen_bool(0.5) { 1 } else { 2 }
+    if rng.gen_bool(0.5) {
+        1
+    } else {
+        2
+    }
 }
 
 fn build_transform(p: &Candidate, rng: &mut impl Rng) -> Transform {
@@ -125,6 +169,39 @@ fn build_transform(p: &Candidate, rng: &mut impl Rng) -> Transform {
     }
 }
 
+// Distance-based culling pass (runs at coarse interval to amortize cost)
+fn cull_trees(
+    time: Res<Time>,
+    cfg: Res<VegetationCullingConfig>,
+    mut state: ResMut<VegetationCullingState>,
+    q_ball: Query<&Transform, With<Ball>>,
+    mut q_trees: Query<(&mut Visibility, &Transform, &mut TreeCulled), With<Tree>>,
+) {
+    if !state.timer.tick(time.delta()).just_finished() {
+        return;
+    }
+    let Ok(ball_t) = q_ball.get_single() else { return; };
+
+    let origin = ball_t.translation;
+    let max_d = cfg.max_distance;
+    let h = cfg.hysteresis;
+    let hide_r = max_d + h;
+    let show_r = (max_d - h).max(0.0);
+    let hide_r2 = hide_r * hide_r;
+    let show_r2 = show_r * show_r;
+
+    for (mut vis, t, mut culled) in &mut q_trees {
+        let d2 = (t.translation - origin).length_squared();
+        if !culled.0 && d2 > hide_r2 {
+            *vis = Visibility::Hidden;
+            culled.0 = true;
+        } else if culled.0 && d2 < show_r2 {
+            *vis = Visibility::Inherited;
+            culled.0 = false;
+        }
+    }
+}
+
 fn spawn_trees(
     mut commands: Commands,
     assets: Res<AssetServer>,
@@ -137,6 +214,8 @@ fn spawn_trees(
 
     let mut spawned = 0usize;
     let mut attempts = 0usize;
+    let mut early_noise_rejects = 0usize;
+    let mut slope_rejects = 0usize;
 
     for base in generate_grid_points(half, CELL_SIZE) {
         attempts += 1;
@@ -144,21 +223,32 @@ fn spawn_trees(
             break;
         }
 
-        // Jitter
+        // Jitter point within cell
         let p = jitter_point(base, CELL_SIZE, &mut rng);
 
-        // Surface
-        let (h, n) = sample_surface(&sampler, p);
-
-        // Masks
-        let s_mask = slope_mask(n);
-        if s_mask <= 0.0 { continue; }
+        // Cheap radial + noise evaluation FIRST for early rejection
+        // (height + normal sampling is comparatively expensive: up to 5 height queries)
         let r_mask = radial_mask(p, cfg.play_radius);
-
-        // Noise
+        if r_mask <= 0.0 {
+            continue;
+        }
         let n_val = noise_density(&perlin, p);
 
-        // Density
+        // Preliminary density WITHOUT slope (slope_mask <= 1.0 cannot increase density)
+        let prelim = BASE_DENSITY * n_val * r_mask;
+        if prelim <= THRESHOLD {
+            early_noise_rejects += 1;
+            continue;
+        }
+
+        // Now sample surface (height + normal) only for survivors
+        let (h, n) = sample_surface(&sampler, p);
+        let s_mask = slope_mask(n);
+        if s_mask <= 0.0 {
+            slope_rejects += 1;
+            continue;
+        }
+
         let density = combine_density(BASE_DENSITY, n_val, r_mask, s_mask);
 
         let candidate = Candidate {
@@ -183,10 +273,13 @@ fn spawn_trees(
                     ..default()
                 },
                 Tree,
+                TreeCulled(false),
             ));
             spawned += 1;
         }
     }
 
-    info!("Vegetation: spawned {spawned} trees after {attempts} samples (cell={CELL_SIZE}, threshold={THRESHOLD}).");
+    info!(
+        "Vegetation: spawned {spawned} trees after {attempts} samples (cell={CELL_SIZE}, threshold={THRESHOLD}) | early_noise_rejects={early_noise_rejects} slope_rejects={slope_rejects}"
+    );
 }
