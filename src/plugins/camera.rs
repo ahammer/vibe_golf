@@ -28,6 +28,7 @@ pub struct OrbitCameraConfig {
     pub sens_pitch: f32,
     pub target_height_offset: f32,
     pub min_clearance: f32,
+    pub follow_lag_speed: f32, // exponential smoothing speed
 }
 
 impl Default for OrbitCameraConfig {
@@ -36,12 +37,13 @@ impl Default for OrbitCameraConfig {
             pitch_min: (-10f32).to_radians(),
             pitch_max: 65f32.to_radians(),
             radius_min: 4.0,
-            radius_max: 18.0,
+            radius_max: 32.0,
             zoom_speed: 1.0,
             sens_yaw: 0.005,
             sens_pitch: 0.005,
             target_height_offset: 0.3,
             min_clearance: 1.0,
+            follow_lag_speed: 6.0,
         }
     }
 }
@@ -51,7 +53,7 @@ impl Default for OrbitCameraState {
         Self {
             yaw: 0.0,
             pitch: 20f32.to_radians(),
-            radius: 12.0,
+            radius: 22.0,
         }
     }
 }
@@ -123,6 +125,7 @@ fn orbit_camera_input(
 
 /// Apply orbit transform each frame after input.
 fn orbit_camera_apply(
+    time: Res<Time>,
     state: Res<OrbitCameraState>,
     cfg: Res<OrbitCameraConfig>,
     sampler: Option<Res<TerrainSampler>>,
@@ -148,6 +151,8 @@ fn orbit_camera_apply(
         }
     }
 
-    cam_t.translation = desired_pos;
+    // Exponential smoothing toward desired position (spring-like lag)
+    let alpha = 1.0 - (-cfg.follow_lag_speed * time.delta_seconds()).exp();
+    cam_t.translation = cam_t.translation.lerp(desired_pos, alpha);
     cam_t.look_at(target, Vec3::Y);
 }

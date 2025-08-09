@@ -194,6 +194,10 @@ fn setup_scene(
         Camera3dBundle {
             transform: cam_start,
             camera: Camera { clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() },
+            projection: PerspectiveProjection {
+                fov: 80f32.to_radians(),
+                ..default()
+            }.into(),
             ..default()
         },
         OrbitCamera,
