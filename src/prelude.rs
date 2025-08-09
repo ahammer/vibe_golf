@@ -4,4 +4,5 @@ pub use crate::plugins::scene::{Ball, Hud, ScenePlugin};
 pub use crate::plugins::autoplay::AutoplayPlugin;
 pub use crate::plugins::hud::HudPlugin;
 pub use crate::plugins::camera::CameraPlugin;
+pub use crate::plugins::particles::ParticlePlugin;
 pub use crate::screenshot::{ScreenshotPlugin, ScreenshotConfig, ScreenshotState};

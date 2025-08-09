@@ -9,6 +9,7 @@ use bevy::render::camera::ClearColorConfig;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use std::fs;
+use crate::plugins::particles::{BallGroundImpactEvent, TargetHitEvent, GameOverEvent};
 use std::io::Write;
 use std::path::Path;
 
@@ -270,6 +271,7 @@ fn setup_scene(
 fn simple_ball_physics(
     mut q: Query<(&mut Transform, &mut BallKinematic), With<Ball>>,
     sampler: Res<TerrainSampler>,
+    mut ev_impact: EventWriter<BallGroundImpactEvent>,
 ) {
     let Ok((mut t, mut kin)) = q.get_single_mut() else { return; };
     let dt = 1.0 / 60.0;
@@ -295,6 +297,14 @@ fn simple_ball_physics(
         // Remove any inward (into ground) velocity component
         let vn = kin.vel.dot(n);
         if vn < 0.0 {
+            // Emit ground impact event (intensity based on normal component of velocity)
+            let impact_intensity = (-vn).max(0.0);
+            if impact_intensity > 0.1 {
+                ev_impact.send(BallGroundImpactEvent {
+                    pos: t.translation,
+                    intensity: impact_intensity,
+                });
+            }
             kin.vel -= vn * n;
         }
 
@@ -498,6 +508,8 @@ fn detect_target_hits(
     sampler: Res<TerrainSampler>,
     mut q_target: Query<&mut Transform, (With<Target>, Without<Ball>)>,
     q_ball: Query<(&Transform, &BallKinematic), With<Ball>>,
+    mut ev_hit: EventWriter<TargetHitEvent>,
+    mut ev_game_over: EventWriter<GameOverEvent>,
 ) {
     let Ok((ball_t, kin)) = q_ball.get_single() else { return; };
     let Ok(mut target_t) = q_target.get_single_mut() else { return; };
@@ -509,9 +521,13 @@ fn detect_target_hits(
     if dx <= half && dz <= half {
         // Hit
         score.hits += 1;
+        // Explosion at target center
+        ev_hit.send(TargetHitEvent { pos: target_t.translation });
         if score.hits >= score.max_holes {
             score.game_over = true;
             score.final_time = sim.elapsed_seconds;
+            // Fire game-over event (confetti)
+            ev_game_over.send(GameOverEvent { pos: ball_t.translation });
             // Update high score (lower final_time is better)
             let better = match score.high_score_time {
                 Some(best) => score.final_time < best,
