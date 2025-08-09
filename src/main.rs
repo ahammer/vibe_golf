@@ -1,24 +1,31 @@
+// Migration Note (R1/P0): Reinstated deterministic fixed 60 Hz gameplay tick per architecture & story backlog.
+// Gameplay mutations (autoplay impulses, tick increment, timed logging & exit) now occur in `FixedUpdate`.
+// `SimState` restored to primary `tick` counter (u64) with derived `elapsed_seconds = tick / 60.0` for presentation.
+// Rendering, HUD, and camera smoothing remain in variable frame `Update` schedule.
+
 use bevy::prelude::*;
 use bevy::math::primitives::{Cuboid, Sphere};
+use bevy::time::Fixed; // fixed timestep schedule marker
 use bevy_rapier3d::prelude::*;
 
 mod screenshot;
 use screenshot::{ScreenshotPlugin, ScreenshotConfig, ScreenshotState};
 
-// Simulation timing state now tracks real elapsed seconds & frame count (no fixed 60 Hz tick).
+// Deterministic simulation timing (single writer in FixedUpdate schedule)
 #[derive(Resource, Default)]
 struct SimState {
-    frames: u64,
-    elapsed_seconds: f32,
+    tick: u64,            // increments exactly once per fixed step (60 Hz)
+    elapsed_seconds: f32, // derived each increment = tick / 60.0 (kept for HUD / logs)
 }
+
 impl SimState {
-    fn advance(&mut self, delta: f32) {
-        self.frames += 1;
-        self.elapsed_seconds += delta;
+    fn advance_fixed(&mut self) {
+        self.tick += 1;
+        self.elapsed_seconds = self.tick as f32 / 60.0;
     }
 }
 
-// Auto-play / instrumentation configuration (now time-based rather than tick-based)
+// Auto-play / instrumentation configuration (intervals expressed in seconds)
 #[derive(Resource)]
 struct AutoConfig {
     run_duration_seconds: f32,   // total seconds before exit
@@ -30,9 +37,9 @@ impl Default for AutoConfig {
     fn default() -> Self { Self { run_duration_seconds: 20.0, swing_interval_seconds: 3.0, base_impulse: 6.0, upward_factor: 0.15 } }
 }
 
-// Runtime auto-play state (tracks the next scheduled swing time in seconds)
+// Runtime auto-play state (tracks the next scheduled swing tick)
 #[derive(Resource, Default)]
-struct AutoRuntime { next_swing_time: f32 }
+struct AutoRuntime { next_swing_tick: u64 }
 
 // Logging helper to ensure we only print once per integer second.
 #[derive(Resource, Default)]
@@ -65,6 +72,8 @@ fn main() {
             primary_window: Some(Window { title: "Vibe Golf".into(), ..default() }),
             ..default()
         }))
+        // fixed 60 Hz gameplay tick
+        .insert_resource(Time::<Fixed>::from_hz(60.0))
         // physics
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
         // .add_plugins(RapierDebugRenderPlugin::default())
@@ -72,12 +81,15 @@ fn main() {
         .add_plugins(ScreenshotPlugin)
         // scene setup
         .add_systems(Startup, (setup_scene, setup_ui))
-        // per-frame systems (natural frame rate)
-        .add_systems(Update, (
-            advance_sim_time,
+        // fixed-tick gameplay systems (order: tick -> autoplay -> logging/exit)
+        .add_systems(FixedUpdate, (
+            tick_state,
             scripted_autoplay,
             debug_log_each_second,
             exit_on_duration,
+        ))
+        // per-frame presentation systems
+        .add_systems(Update, (
             update_hud,
             camera_follow,
         ))
@@ -160,7 +172,8 @@ fn setup_ui(mut commands: Commands, assets: Res<AssetServer>) {
         .insert(Hud);
 }
 
-fn advance_sim_time(mut sim: ResMut<SimState>, time: Res<Time>) { sim.advance(time.delta_seconds()); }
+// Increment simulation tick (deterministic 60 Hz)
+fn tick_state(mut sim: ResMut<SimState>) { sim.advance_fixed(); }
 
 // Periodically fire an impulse to move the ball, simulating a scripted auto-play.
 fn scripted_autoplay(
@@ -170,17 +183,20 @@ fn scripted_autoplay(
     mut commands: Commands,
     q_ball: Query<(Entity, &Transform), With<Ball>>,
 ) {
-    if sim.elapsed_seconds < runtime.next_swing_time { return; }
+    if sim.tick < runtime.next_swing_tick { return; }
+    let interval_ticks = (cfg.swing_interval_seconds * 60.0) as u64;
     if let Ok((entity, transform)) = q_ball.get_single() {
-        // Derive a deterministic angle from the number of swings so far
-        let swings_done = (runtime.next_swing_time / cfg.swing_interval_seconds).round() as u64;
+        // Derive deterministic angle from swing index (number of swings already executed)
+        let swings_done = if runtime.next_swing_tick == 0 { 0 } else { runtime.next_swing_tick / interval_ticks.max(1) };
         let angle = (swings_done as f32 * 13.0).to_radians();
         let dir_flat = Vec3::new(angle.cos(), 0.0, angle.sin()).normalize();
         let impulse = dir_flat * cfg.base_impulse + Vec3::Y * (cfg.base_impulse * cfg.upward_factor);
         commands.entity(entity).insert(ExternalImpulse { impulse, torque_impulse: Vec3::ZERO });
         info!(
-            "AUTOPLAY swing t={:.2}s pos=({:.2},{:.2},{:.2}) impulse=({:.2},{:.2},{:.2})",
+            "AUTOPLAY swing t={:.2}s tick={} swing={} pos=({:.2},{:.2},{:.2}) impulse=({:.2},{:.2},{:.2})",
             sim.elapsed_seconds,
+            sim.tick,
+            swings_done,
             transform.translation.x,
             transform.translation.y,
             transform.translation.z,
@@ -189,8 +205,8 @@ fn scripted_autoplay(
             impulse.z
         );
     }
-    // schedule next swing
-    runtime.next_swing_time += cfg.swing_interval_seconds;
+    // schedule next swing (convert seconds interval to ticks)
+    runtime.next_swing_tick += interval_ticks.max(1);
 }
 
 // Log basic telemetry each in-game second.
@@ -199,14 +215,15 @@ fn debug_log_each_second(
     mut log_state: ResMut<LogState>,
     q_ball: Query<(&Transform, &Velocity), With<Ball>>,
 ) {
-    let current_second = sim.elapsed_seconds as u64;
+    if sim.tick == 0 || sim.tick % 60 != 0 { return; }
+    let current_second = (sim.tick / 60) as u64;
     if current_second == 0 || current_second == log_state.last_logged_second { return; }
     log_state.last_logged_second = current_second;
     if let Ok((t, vel)) = q_ball.get_single() {
         info!(
-            "T+{}s frames={} ball=({:.2},{:.2},{:.2}) speed={:.2}",
+            "T+{}s tick={} ball=({:.2},{:.2},{:.2}) speed={:.2}",
             current_second,
-            sim.frames,
+            sim.tick,
             t.translation.x,
             t.translation.y,
             t.translation.z,
@@ -223,7 +240,8 @@ fn exit_on_duration(
     screenshot_state: Option<Res<ScreenshotState>>,
     mut exit: EventWriter<AppExit>,
 ) {
-    if sim.elapsed_seconds < cfg.run_duration_seconds { return; }
+    let target_ticks = (cfg.run_duration_seconds * 60.0) as u64;
+    if sim.tick < target_ticks { return; }
     if let (Some(c), Some(state)) = (screenshot_cfg, screenshot_state) {
         if c.enabled && !state.last_saved { return; }
     }
@@ -237,7 +255,7 @@ fn update_hud(
 ) {
     if let (Ok(vel), Ok(mut text)) = (q_vel.get_single(), q_text.get_single_mut()) {
         let speed = vel.linvel.length();
-        text.sections[0].value = format!("Time: {:.2}s | Speed: {:.2} m/s", sim.elapsed_seconds, speed);
+        text.sections[0].value = format!("Tick: {} (t={:.2}s) | Speed: {:.2} m/s", sim.tick, sim.elapsed_seconds, speed);
     }
 }
 
@@ -271,10 +289,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sim_state_advances() {
+    fn sim_state_fixed_ticks() {
         let mut s = SimState::default();
-        for _ in 0..5 { s.advance(0.016); }
-        assert_eq!(s.frames, 5);
-        assert!((s.elapsed_seconds - 0.08).abs() < 1e-6);
+        for i in 0..5 { s.advance_fixed(); assert_eq!(s.tick, i as u64 + 1); }
+        assert_eq!(s.tick, 5);
+        assert!((s.elapsed_seconds - (5.0/60.0)).abs() < 1e-6);
     }
 }

@@ -30,7 +30,26 @@ pub struct ScreenshotPlugin;
 impl Plugin for ScreenshotPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ScreenshotState>()
+            .add_systems(Startup, cleanup_previous_screenshots)
             .add_systems(Update, capture_screenshot);
+    }
+}
+
+fn cleanup_previous_screenshots(cfg: Option<Res<ScreenshotConfig>>) {
+    let Some(cfg) = cfg else { return; };
+    if !cfg.enabled { return; }
+    if let Some(dir) = Path::new(&cfg.first_frame_path).parent() {
+        if let Ok(entries) = fs::read_dir(dir) {
+            let mut removed = 0u32;
+            for entry in entries.flatten() {
+                if let Ok(ft) = entry.file_type() { if !ft.is_file() { continue; } }
+                let path = entry.path();
+                if let Some(ext) = path.extension() { if ext == "png" { if fs::remove_file(&path).is_ok() { removed += 1; } } }
+            }
+            if removed > 0 { info!("SCREENSHOT cleanup removed={}", removed); }
+        }
+        // ensure directory exists
+        let _ = fs::create_dir_all(dir);
     }
 }
 
@@ -52,8 +71,8 @@ fn capture_screenshot(
         }
     }
 
-    // Capture first frame (after at least one frame so window has rendered)
-    if sim.frames >= 1 && !state.first_requested {
+    // Capture first frame (after at least one fixed tick so initial render occurred)
+    if sim.tick >= 1 && !state.first_requested {
         if let Ok((window_entity, _)) = q_window.get_single() {
             screenshot_manager.save_screenshot_to_disk(window_entity, cfg.first_frame_path.clone());
             state.first_requested = true;
