@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 use noise::{NoiseFn, Perlin};
 use bevy::render::mesh::PrimitiveTopology;
+use crate::plugins::contour_material::{ContourMaterial, topo_palette};
 
 /// Configuration for procedural terrain height sampling & mesh generation.
 #[derive(Resource, Clone)]
@@ -153,7 +154,7 @@ fn generate_single_chunk(
     mut commands: Commands,
     sampler: Res<TerrainSampler>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut mats: ResMut<Assets<StandardMaterial>>,
+    mut contour_mats: ResMut<Assets<ContourMaterial>>,
 ) {
     let cfg = &sampler.cfg;
     let res = cfg.resolution;
@@ -201,18 +202,49 @@ fn generate_single_chunk(
             positions.push([local_x, h, local_z]);
             normals.push([n.x, n.y, n.z]);
             uvs.push([i as f32 / res as f32, j as f32 / res as f32]);
-            // Vertex color derived from normalized height & slope (normal.y)
-            let h_n = if max_h > min_h { (h - min_h) / (max_h - min_h) } else { 0.0 };
-            let low = Vec3::new(0.10, 0.28, 0.10);
-            let mid = Vec3::new(0.18, 0.46, 0.18);
-            let high = Vec3::new(0.55, 0.58, 0.42);
-            let base = if h_n < 0.5 {
-                low.lerp(mid, h_n * 2.0)
-            } else {
-                mid.lerp(high, (h_n - 0.5) * 2.0)
-            };
-            let slope_dark = n.y.clamp(0.0, 1.0).powf(0.6);
-            let final_col = base * (0.55 + 0.45 * slope_dark);
+            // Contour map style vertex color:
+            // - Discrete elevation bands with topographic palette
+            // - Dark contour lines at fixed world height intervals
+            // - Slight slope darkening for readability (reduced vs previous)
+            let h_norm = if max_h > min_h { (h - min_h) / (max_h - min_h) } else { 0.0 };
+            // Elevation band palette (approx traditional topo colors)
+            // 0: deep lowland/forest, 1: light high plateau
+            let palette: [Vec3; 7] = [
+                Vec3::new(0.06, 0.20, 0.18), // dark green
+                Vec3::new(0.12, 0.32, 0.22), // forest green
+                Vec3::new(0.32, 0.46, 0.24), // grass
+                Vec3::new(0.55, 0.58, 0.34), // light grass / scrub
+                Vec3::new(0.63, 0.55, 0.38), // tan
+                Vec3::new(0.52, 0.42, 0.34), // light brown
+                Vec3::new(0.55, 0.55, 0.55), // grey (rocky high)
+            ];
+            let bands = (palette.len() - 1) as f32;
+            let scaled = h_norm * bands;
+            let band_idx = scaled.floor().clamp(0.0, bands - 1.0) as usize;
+            let t_band = (scaled - band_idx as f32).clamp(0.0, 1.0);
+            let base_col = palette[band_idx].lerp(palette[band_idx + 1], t_band);
+
+            // Contour lines every X world units (height), thickness controls fade width
+            let contour_interval = 1.0_f32;
+            let contour_thickness = 0.12_f32; // fraction of interval for dark line
+            let h_mod = (h / contour_interval).fract();
+            let dist_to_line = (h_mod - 0.5).abs(); // 0 at half interval edges -> shift to nearest line
+            // Distance to nearest integer (line at multiples): use min(h_mod, 1-h_mod)
+            let d_line = h_mod.min(1.0 - h_mod);
+            // Line strength (1 at center of line, 0 away)
+            let line_strength = (1.0 - (d_line / contour_thickness)).clamp(0.0, 1.0).powf(1.5);
+
+            // Slope darkening (reduced impact to keep palette integrity)
+            let slope_factor = n.y.clamp(0.0, 1.0).powf(0.8);
+            let slope_dark = 0.85 + 0.15 * slope_factor;
+
+            // Apply contour ink (dark brown/grey) overlay
+            let ink = Vec3::new(0.15, 0.12, 0.10);
+            let contour_col = base_col.lerp(ink, line_strength * 0.85);
+
+            // Overall brightness adjustment (slightly darker than previous)
+            let final_col = contour_col * slope_dark * 0.92;
+
             colors.push([final_col.x, final_col.y, final_col.z, 1.0]);
         }
     }
@@ -238,12 +270,21 @@ fn generate_single_chunk(
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
     mesh.insert_indices(bevy::render::mesh::Indices::U32(indices));
     let mesh_handle = meshes.add(mesh);
-    let material = mats.add(StandardMaterial {
-        base_color: Color::WHITE, // vertex colors supply terrain tint
-        perceptual_roughness: 0.9,
-        metallic: 0.0,
-        ..default()
-    });
+
+    // Build contour material (animated shader) with palette + dynamic height range
+    let (palette_arr, palette_len) = topo_palette();
+    let mut contour_mat = ContourMaterial::default();
+    contour_mat.params.min_height = min_h;
+    contour_mat.params.max_height = max_h;
+    contour_mat.params.interval = 0.5;      // contour spacing (world height units)
+    contour_mat.params.thickness = 0.06;    // line half-thickness factor
+    contour_mat.params.scroll_speed = 0.10; // vertical drift speed
+    contour_mat.params.darken = 0.88;       // global darken multiplier
+    contour_mat.params.palette_len = palette_len;
+    for i in 0..palette_len as usize {
+        contour_mat.palette.colors[i] = palette_arr[i];
+    }
+    let material = contour_mats.add(contour_mat);
 
     // Heightfield collider (Rapier expects rows * cols)
     let nrows = (res + 1) as usize;
@@ -251,7 +292,7 @@ fn generate_single_chunk(
     let collider = Collider::heightfield(heights, nrows, ncols, Vec3::new(step, 1.0, step));
 
     commands
-        .spawn(PbrBundle {
+        .spawn(MaterialMeshBundle {
             mesh: mesh_handle,
             material,
             transform: Transform::from_xyz(-half, 0.0, -half),

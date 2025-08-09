@@ -15,6 +15,7 @@ pub mod plugins {
     pub mod terrain;
     pub mod particles;
     pub mod game_audio;
+    pub mod contour_material;
 }
 use plugins::core_sim::CoreSimPlugin;
 use plugins::scene::ScenePlugin;
@@ -23,6 +24,7 @@ use plugins::camera::CameraPlugin;
 use plugins::terrain::TerrainPlugin;
 use plugins::particles::ParticlePlugin;
 use plugins::game_audio::GameAudioPlugin;
+use plugins::contour_material::ContourMaterialPlugin;
 
 mod screenshot;
 use screenshot::{ScreenshotPlugin, ScreenshotConfig};
@@ -43,6 +45,7 @@ fn main() {
         }))
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
         .add_plugins(CoreSimPlugin)      // timing + shared resources
+        .add_plugins(ContourMaterialPlugin) // custom contour material (shader)
         .add_plugins(TerrainPlugin)      // procedural terrain
         .add_plugins(ParticlePlugin)     // particle & FX systems (register events before scene systems use them)
         .add_plugins(GameAudioPlugin)    // game audio (music + sfx)

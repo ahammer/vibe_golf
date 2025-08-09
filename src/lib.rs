@@ -9,6 +9,8 @@ pub mod plugins {
     pub mod camera;
     pub mod terrain;
     pub mod particles;
+    pub mod game_audio;
+    pub mod contour_material;
 }
 pub mod screenshot;
 pub mod prelude;
