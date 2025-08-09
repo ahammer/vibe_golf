@@ -1,6 +1,12 @@
 use bevy::prelude::*;
 use bevy::audio::{AudioSource, AudioBundle, PlaybackSettings, PlaybackMode, Volume};
-use crate::plugins::particles::{BallGroundImpactEvent, TargetHitEvent, GameOverEvent, ShotFiredEvent};
+use crate::plugins::particles::{
+    BallGroundImpactEvent,
+    TargetHitEvent,
+    GameOverEvent,
+    ShotFiredEvent,
+    BOUNCE_EFFECT_INTENSITY_MIN,
+};
 
 pub struct GameAudioPlugin;
 
@@ -81,7 +87,12 @@ fn play_event_sfx(
     let Some(sfx) = sfx else { return; };
 
     for e in ev_bounce.read() {
-        let v = (e.intensity / 6.0).clamp(0.2, 1.0);
+        if e.intensity < BOUNCE_EFFECT_INTENSITY_MIN {
+            continue;
+        }
+        // Map intensity range [threshold .. ~6] -> volume [0.25 .. 1.0]
+        let norm = ((e.intensity - BOUNCE_EFFECT_INTENSITY_MIN) / (6.0 - BOUNCE_EFFECT_INTENSITY_MIN)).clamp(0.0, 1.0);
+        let v = 0.25 + norm * 0.75;
         commands.spawn(AudioBundle {
             source: sfx.bounce.clone(),
             settings: PlaybackSettings {

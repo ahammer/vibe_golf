@@ -28,6 +28,9 @@ pub struct ShotFiredEvent {
     pub power: f32,
 }
 
+// Minimum impact intensity required to spawn bounce dust & play bounce SFX.
+pub const BOUNCE_EFFECT_INTENSITY_MIN: f32 = 2.0;
+
 // Internal particle variants
 #[derive(Component)]
 enum ParticleKind {
@@ -183,7 +186,7 @@ fn spawn_dust_on_impact(
 ) {
     let mesh = meshes.add(Mesh::from(Sphere { radius: 0.15 }));
     for e in ev.read() {
-        if e.intensity < 1.0 { continue; }
+        if e.intensity < BOUNCE_EFFECT_INTENSITY_MIN { continue; }
         let count = (6.0 + e.intensity * 4.0).clamp(6.0, 40.0) as usize;
         let mut rng = thread_rng();
         for _ in 0..count {

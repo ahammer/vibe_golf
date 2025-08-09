@@ -32,6 +32,11 @@ pub struct PowerGauge;
 #[derive(Component)]
 pub struct ShotIndicator;
 
+#[derive(Component)]
+pub struct PowerBar;        // UI container for power bar
+#[derive(Component)]
+pub struct PowerBarFill;    // UI fill element whose width/color show power
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShotMode {
     Idle,
@@ -115,7 +120,6 @@ fn save_high_score_time(t: f32) {
 pub struct ScenePlugin;
 
 // Generate an inside-facing (inverted) UV sphere suitable for equirectangular sky textures.
-// UV mapping: u in [0,1] from -PI..PI (longitude), v in [0,1] from -PI/2..PI/2 (latitude).
 fn generate_inverted_sphere(longitudes: u32, latitudes: u32, radius: f32) -> Mesh {
     let longs = longitudes.max(3);
     let lats = latitudes.max(2);
@@ -124,26 +128,22 @@ fn generate_inverted_sphere(longitudes: u32, latitudes: u32, radius: f32) -> Mes
     let mut normals = Vec::with_capacity(positions.capacity());
     for y in 0..=lats {
         let v = y as f32 / lats as f32;
-        let theta = (v - 0.5) * std::f32::consts::PI; // -pi/2 .. pi/2
+        let theta = (v - 0.5) * std::f32::consts::PI;
         let cos_theta = theta.cos();
         let sin_theta = theta.sin();
         for x in 0..=longs {
             let u = x as f32 / longs as f32;
-            let phi = (u - 0.5) * std::f32::consts::TAU; // -pi .. pi
+            let phi = (u - 0.5) * std::f32::consts::TAU;
             let cos_phi = phi.cos();
             let sin_phi = phi.sin();
             let px = cos_theta * cos_phi;
             let py = sin_theta;
             let pz = cos_theta * sin_phi;
-            // Position on sphere
             positions.push([radius * px, radius * py, radius * pz]);
-            // For inside-facing sphere we flip normals inward
             normals.push([-px, -py, -pz]);
-            // Equirectangular UV (u right, v up)
             uvs.push([u, 1.0 - v]);
         }
     }
-    // Indices (invert winding so inside is front-facing with default back-face culling)
     let mut indices: Vec<u32> = Vec::with_capacity((longs * lats * 6) as usize);
     let row_stride = longs + 1;
     for y in 0..lats {
@@ -152,7 +152,6 @@ fn generate_inverted_sphere(longitudes: u32, latitudes: u32, radius: f32) -> Mes
             let i1 = i0 + 1;
             let i2 = i0 + row_stride;
             let i3 = i2 + 1;
-            // Original (outside) would be (i0,i2,i1) and (i1,i2,i3); we swap order
             indices.extend_from_slice(&[i0, i1, i2, i1, i3, i2]);
         }
     }
@@ -163,6 +162,7 @@ fn generate_inverted_sphere(longitudes: u32, latitudes: u32, radius: f32) -> Mes
     mesh.insert_indices(Indices::U32(indices));
     mesh
 }
+
 impl Plugin for ScenePlugin {
     fn build(&self, app: &mut App) {
         app
@@ -171,7 +171,13 @@ impl Plugin for ScenePlugin {
             .insert_resource(Score::default())
             .add_systems(Startup, (setup_scene, setup_ui))
             .add_systems(FixedUpdate, (simple_ball_physics, update_shot_charge, detect_target_hits))
-            .add_systems(Update, (handle_shot_input, update_shot_indicator, update_power_gauge, reset_game));
+            .add_systems(Update, (
+                handle_shot_input,
+                update_shot_indicator,
+                update_power_gauge,
+                update_power_bar,
+                reset_game
+            ));
     }
 }
 
@@ -182,7 +188,6 @@ fn setup_scene(
     assets: Res<AssetServer>,
     sampler: Res<TerrainSampler>,
 ) {
-    // camera (orbit)
     let cam_start = Transform::from_xyz(-12.0, 10.0, 18.0)
         .looking_at(Vec3::new(0.0, 0.5, 0.0), Vec3::Y);
     commands.spawn((
@@ -194,7 +199,6 @@ fn setup_scene(
         OrbitCamera,
     ));
 
-    // Sky sphere using HDR skymap (custom inverted sphere mesh for proper equirect mapping)
     let sky_tex = assets.load("skymap/kloppenheim_06_puresky_1k.hdr");
     let sky_mesh = generate_inverted_sphere(64, 32, 500.0);
     commands.spawn(PbrBundle {
@@ -202,14 +206,12 @@ fn setup_scene(
         material: mats.add(StandardMaterial {
             base_color_texture: Some(sky_tex),
             unlit: true,
-            // default back-face culling now hides the outside; inside faces are front after inversion
             ..default()
         }),
         transform: Transform::IDENTITY,
         ..default()
     });
 
-    // light with shadows (using default cascades)
     commands.spawn(DirectionalLightBundle {
         directional_light: DirectionalLight {
             illuminance: 40_000.0,
@@ -220,7 +222,6 @@ fn setup_scene(
         ..default()
     });
 
-    // ball (manual kinematic vertical drop with sampler collision)
     let ball_radius = 0.25;
     let x = 0.0;
     let z = 0.0;
@@ -229,28 +230,40 @@ fn setup_scene(
     commands
         .spawn(PbrBundle {
             mesh: meshes.add(Mesh::from(Sphere { radius: ball_radius })),
-            material: mats.add(Color::srgb(0.95, 0.95, 0.95)),
+            material: mats.add(StandardMaterial {
+                base_color: Color::srgb(0.92, 0.93, 0.95),
+                emissive: LinearRgba::new(0.25, 0.35, 0.60, 1.0) * 0.4,
+                perceptual_roughness: 0.35,
+                metallic: 0.0,
+                ..default()
+            }),
             transform: Transform::from_xyz(x, spawn_y, z),
             ..default()
         })
         .insert(Ball)
         .insert(BallKinematic { radius: ball_radius, vel: Vec3::ZERO });
 
-    // shot indicator (hidden until charging); local +Z points along direction
+    // Shot indicator (emissive beam)
     commands
         .spawn(PbrBundle {
             mesh: meshes.add(Mesh::from(Cuboid::from_size(Vec3::new(0.12, 0.12, 1.0)))),
-            material: mats.add(Color::srgb(1.0, 0.85, 0.1)),
+            material: mats.add(StandardMaterial {
+                base_color: Color::srgb(1.0, 0.85, 0.10),
+                emissive: LinearRgba::new(3.0, 2.0, 0.3, 1.0) * 0.5,
+                perceptual_roughness: 0.5,
+                metallic: 0.0,
+                ..default()
+            }),
             transform: Transform::from_xyz(x, ground_h + 0.25, z),
             visibility: Visibility::Hidden,
             ..default()
         })
         .insert(ShotIndicator);
 
-    // distant tall target pillar (easier to see from spawn)
+    // Target pillar
     let target_x = 0.0;
     let target_z = 80.0;
-    let pillar_height = 16.0; // doubled height for higher visibility
+    let pillar_height = 16.0;
     let target_ground = sampler.height(target_x, target_z);
     commands
         .spawn(PbrBundle {
@@ -277,27 +290,19 @@ fn simple_ball_physics(
     let dt = 1.0 / 60.0;
     let g = -9.81;
 
-    // Apply gravity
     kin.vel.y += g * dt;
-
-    // Predict position
     t.translation += kin.vel * dt;
 
-    // Sample terrain height & normal under new position
     let h = sampler.height(t.translation.x, t.translation.z);
     let surface_y = h + kin.radius;
 
     if t.translation.y <= surface_y {
-        // We are contacting / below surface: project onto surface
         t.translation.y = surface_y;
 
-        // Terrain normal (for slope)
         let n = sampler.normal(t.translation.x, t.translation.z);
 
-        // Remove any inward (into ground) velocity component
         let vn = kin.vel.dot(n);
         if vn < 0.0 {
-            // Emit ground impact event (intensity based on normal component of velocity)
             let impact_intensity = (-vn).max(0.0);
             if impact_intensity > 0.1 {
                 ev_impact.send(BallGroundImpactEvent {
@@ -308,12 +313,10 @@ fn simple_ball_physics(
             kin.vel -= vn * n;
         }
 
-        // Compute tangential component for sliding
         let g_vec = Vec3::Y * g;
         let g_parallel = g_vec - n * g_vec.dot(n);
         kin.vel += g_parallel * dt;
 
-        // Friction
         let mut tangential = kin.vel - n * kin.vel.dot(n);
         let speed = tangential.length();
         if speed > 1e-5 {
@@ -330,7 +333,6 @@ fn simple_ball_physics(
             }
         }
 
-        // Visual rolling
         let disp = tangential * dt;
         let disp_len = disp.length();
         if disp_len > 1e-6 {
@@ -345,7 +347,6 @@ fn simple_ball_physics(
 
 fn setup_ui(mut commands: Commands, assets: Res<AssetServer>) {
     let font = assets.load("fonts/FiraSans-Bold.ttf");
-    // Left HUD
     commands
         .spawn(
             TextBundle::from_section(
@@ -356,12 +357,12 @@ fn setup_ui(mut commands: Commands, assets: Res<AssetServer>) {
         )
         .insert(Hud);
 
-    // Power gauge (top-right)
+    // Power gauge text
     commands
         .spawn(
             TextBundle::from_section(
                 "Power: --",
-                TextStyle { font, font_size: 22.0, color: Color::WHITE },
+                TextStyle { font: font.clone(), font_size: 22.0, color: Color::WHITE },
             )
             .with_style(Style {
                 position_type: PositionType::Absolute,
@@ -371,6 +372,42 @@ fn setup_ui(mut commands: Commands, assets: Res<AssetServer>) {
             }),
         )
         .insert(PowerGauge);
+
+    // Power bar container + fill
+    commands
+        .spawn((
+            NodeBundle {
+                style: Style {
+                    position_type: PositionType::Absolute,
+                    right: Val::Px(12.0),
+                    top: Val::Px(36.0),
+                    width: Val::Px(180.0),
+                    height: Val::Px(18.0),
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::FlexStart,
+                    padding: UiRect::all(Val::Px(2.0)),
+                    ..default()
+                },
+                background_color: Color::srgb(0.08, 0.08, 0.10).into(),
+                ..default()
+            },
+            PowerBar,
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                NodeBundle {
+                    style: Style {
+                        width: Val::Percent(0.0),
+                        height: Val::Percent(100.0),
+                        ..default()
+                    },
+                    background_color: Color::srgb(0.15, 0.60, 0.25).into(),
+                    ..default()
+                },
+                PowerBarFill,
+            ));
+        });
 }
 
 // -------- Shooting Systems --------
@@ -392,19 +429,15 @@ fn handle_shot_input(
     let Ok(cam_t) = q_cam.get_single() else { return; };
     let Ok((mut ind_t, mut vis)) = q_indicator.get_single_mut() else { return; };
 
-    // Start charging
     if buttons.just_pressed(MouseButton::Left) && state.mode == ShotMode::Idle {
         state.mode = ShotMode::Charging;
         state.power = 0.0;
         state.rising = true;
-        // Position indicator at ball
         ind_t.translation = ball_t.translation + Vec3::Y * (kin.radius * 0.5);
         *vis = Visibility::Visible;
     }
 
-    // Release => fire
     if buttons.just_released(MouseButton::Left) && state.mode == ShotMode::Charging {
-        // Direction: camera->ball vector elevated by fixed angle
         let cam_to_ball = (ball_t.translation - cam_t.translation).normalize_or_zero();
         let horiz = Vec3::new(cam_to_ball.x, 0.0, cam_to_ball.z).normalize_or_zero();
         let angle = cfg.up_angle_deg.to_radians();
@@ -416,7 +449,6 @@ fn handle_shot_input(
         score.shots += 1;
         ev_shot.send(ShotFiredEvent { pos: ball_t.translation, power: shot_power });
 
-        // Reset
         state.mode = ShotMode::Idle;
         state.power = 0.0;
         *vis = Visibility::Hidden;
@@ -468,21 +500,51 @@ fn update_power_gauge(
     }
 }
 
+fn update_power_bar(
+    state: Res<ShotState>,
+    mut q_fill: Query<(&mut Style, &mut BackgroundColor), With<PowerBarFill>>,
+) {
+    if !state.is_changed() { return; }
+    let power = match state.mode {
+        ShotMode::Idle => 0.0,
+        ShotMode::Charging => state.power,
+    };
+    if let Ok((mut style, mut color)) = q_fill.get_single_mut() {
+        style.width = Val::Percent(power * 100.0);
+        // Gradient green -> yellow -> red
+        let col = if power < 0.5 {
+            let t = power / 0.5;
+            Color::srgb(
+                0.15 + (0.70 - 0.15) * t,
+                0.60 + (0.85 - 0.60) * t,
+                0.25 + (0.10 - 0.25) * t,
+            )
+        } else {
+            let t = (power - 0.5) / 0.5;
+            Color::srgb(
+                0.70 + (0.90 - 0.70) * t,
+                0.85 + (0.20 - 0.85) * t,
+                0.10 + (0.15 - 0.10) * t,
+            )
+        };
+        *color = col.into();
+    }
+}
+
 fn update_shot_indicator(
     state: Res<ShotState>,
     cfg: Res<ShotConfig>,
     q_ball: Query<&Transform, (With<Ball>, Without<ShotIndicator>)>,
     q_cam: Query<&Transform, (With<OrbitCamera>, Without<Ball>, Without<ShotIndicator>)>,
-    mut q_ind: Query<&mut Transform, (With<ShotIndicator>, Without<Ball>, Without<OrbitCamera>)>,
-    mut q_ind_vis: Query<&mut Visibility, (With<ShotIndicator>, Without<Ball>, Without<OrbitCamera>)>,
+    mut q_ind: Query<(&mut Transform, &Handle<StandardMaterial>, &mut Visibility), With<ShotIndicator>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     if state.mode != ShotMode::Charging {
         return;
     }
     let Ok(ball_t) = q_ball.get_single() else { return; };
     let Ok(cam_t) = q_cam.get_single() else { return; };
-    let Ok(mut ind_t) = q_ind.get_single_mut() else { return; };
-    let Ok(mut vis) = q_ind_vis.get_single_mut() else { return; };
+    let Ok((mut ind_t, mat_handle, mut vis)) = q_ind.get_single_mut() else { return; };
     *vis = Visibility::Visible;
 
     let cam_to_ball = (ball_t.translation - cam_t.translation).normalize_or_zero();
@@ -490,18 +552,19 @@ fn update_shot_indicator(
     let angle = cfg.up_angle_deg.to_radians();
     let dir = (horiz * angle.cos() + Vec3::Y * angle.sin()).normalize_or_zero();
 
-    // Length scale
     let len = cfg.indicator_base_len + cfg.indicator_var_len * state.power;
-    // Position near ball surface
     let base_pos = ball_t.translation + Vec3::Y * 0.1;
     ind_t.translation = base_pos + dir * (len * 0.5);
-    // Scale: keep x,y thin, z set to len
     ind_t.scale = Vec3::new(0.12, 0.12, len);
 
-    // Orient: from +Z to dir
     let from = Vec3::Z;
     if dir.length_squared() > 0.0 {
         ind_t.rotation = Quat::from_rotation_arc(from, dir);
+    }
+
+    if let Some(mat) = materials.get_mut(mat_handle) {
+        let intensity = 0.5 + state.power * 2.5;
+        mat.emissive = LinearRgba::new(3.0, 2.0, 0.3, 1.0) * intensity;
     }
 }
 
@@ -517,21 +580,16 @@ fn detect_target_hits(
     let Ok((ball_t, kin)) = q_ball.get_single() else { return; };
     let Ok(mut target_t) = q_target.get_single_mut() else { return; };
 
-    // Pillar dimensions: 1.0 x pillar_height x 1.0; half extents 0.5,0.5 horizontally
     let half = 0.5 + kin.radius;
     let dx = (ball_t.translation.x - target_t.translation.x).abs();
     let dz = (ball_t.translation.z - target_t.translation.z).abs();
     if dx <= half && dz <= half {
-        // Hit
         score.hits += 1;
-        // Explosion at target center
         ev_hit.send(TargetHitEvent { pos: target_t.translation });
         if score.hits >= score.max_holes {
             score.game_over = true;
             score.final_time = sim.elapsed_seconds;
-            // Fire game-over event (confetti)
             ev_game_over.send(GameOverEvent { pos: ball_t.translation });
-            // Update high score (lower final_time is better)
             let better = match score.high_score_time {
                 Some(best) => score.final_time < best,
                 None => true,
@@ -543,8 +601,6 @@ fn detect_target_hits(
             return;
         }
 
-        // Reposition pillar pseudo-randomly within chunk using angular increment
-        // Approx chunk half-size (matches TerrainConfig::default chunk_size 384.0)
         let chunk_half = 384.0 * 0.5 - 5.0;
         let angle_deg = (score.hits as f32 * 137.0) % 360.0;
         let angle = angle_deg.to_radians();
@@ -553,7 +609,7 @@ fn detect_target_hits(
         let mut new_z = ring * angle.sin();
         new_x = new_x.clamp(-chunk_half, chunk_half);
         new_z = new_z.clamp(-chunk_half, chunk_half);
-        let pillar_half_height = target_t.scale.y * 0.5; // original scaling 1.0 in Y (no scale change), fallback
+        let pillar_half_height = target_t.scale.y * 0.5;
         let ground = sampler.height(new_x, new_z);
         target_t.translation = Vec3::new(new_x, ground + pillar_half_height, new_z);
     }
@@ -570,17 +626,14 @@ fn reset_game(
     if !(score.game_over && keys.just_pressed(KeyCode::KeyR)) {
         return;
     }
-    // Reset sim state
     sim.tick = 0;
     sim.elapsed_seconds = 0.0;
 
-    // Reset score (preserve high_score_time)
     score.hits = 0;
     score.shots = 0;
     score.game_over = false;
     score.final_time = 0.0;
 
-    // Reset ball position / velocity
     if let Ok((mut t, mut kin)) = q_ball.get_single_mut() {
         let x = 0.0;
         let z = 0.0;
@@ -591,7 +644,6 @@ fn reset_game(
         kin.vel = Vec3::ZERO;
     }
 
-    // Reset target to original pillar location
     if let Ok(mut tt) = q_target.get_single_mut() {
         let target_x = 0.0;
         let target_z = 80.0;
