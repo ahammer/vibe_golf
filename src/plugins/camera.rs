@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::input::mouse::{MouseMotion, MouseWheel};
+use bevy::window::{PrimaryWindow, CursorGrabMode};
 use crate::plugins::scene::Ball;
 use crate::plugins::terrain::TerrainSampler;
 
@@ -56,11 +57,37 @@ impl Default for OrbitCameraState {
 }
 
 pub struct CameraPlugin;
+
+/// Tracks whether the cursor is currently locked for orbit control.
+#[derive(Resource, Default)]
+pub struct OrbitCaptureState {
+    pub captured: bool,
+}
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(OrbitCameraConfig::default())
             .insert_resource(OrbitCameraState::default())
-            .add_systems(Update, (orbit_camera_input, orbit_camera_apply));
+            .insert_resource(OrbitCaptureState::default())
+            .add_systems(Update, (orbit_camera_capture, orbit_camera_input, orbit_camera_apply));
+    }
+}
+
+fn orbit_camera_capture(
+    buttons: Res<ButtonInput<MouseButton>>,
+    mut windows: Query<&mut Window, With<PrimaryWindow>>,
+    mut cap: ResMut<OrbitCaptureState>,
+) {
+    if let Ok(mut win) = windows.get_single_mut() {
+        let want = buttons.pressed(MouseButton::Right);
+        if want && !cap.captured {
+            win.cursor.visible = false;
+            win.cursor.grab_mode = CursorGrabMode::Locked;
+            cap.captured = true;
+        } else if !want && cap.captured {
+            win.cursor.visible = true;
+            win.cursor.grab_mode = CursorGrabMode::None;
+            cap.captured = false;
+        }
     }
 }
 

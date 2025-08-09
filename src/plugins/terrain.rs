@@ -36,8 +36,8 @@ impl Default for TerrainConfig {
             detail_octaves: 5,
             warp_frequency: 0.020,      // warp scale
             warp_amplitude: 6.0,        // horizontal distortion strength
-            chunk_size: 384.0,          // much larger play area
-            resolution: 96,             // lower density -> less regular grid
+            chunk_size: 384.0,          // play area size
+            resolution: 192,            // higher density for smoother surface (was 96)
         }
     }
 }
