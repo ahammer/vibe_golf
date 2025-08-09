@@ -14,6 +14,9 @@ pub struct BallKinematic {
     pub vel: Vec3,
 }
 
+#[derive(Component)]
+pub struct Target;
+
 pub struct ScenePlugin;
 impl Plugin for ScenePlugin {
     fn build(&self, app: &mut App) {
@@ -65,16 +68,26 @@ fn setup_scene(
         .insert(Ball)
         .insert(BallKinematic { radius: ball_radius, vel: Vec3::ZERO });
 
-    // target cube
+    // distant tall target pillar (easier to see from spawn)
+    let target_x = 0.0;
+    let target_z = 80.0;
+    let pillar_height = 16.0; // doubled height for higher visibility
+    let target_ground = sampler.height(target_x, target_z);
     commands
         .spawn(PbrBundle {
-            mesh: meshes.add(Mesh::from(Cuboid::from_size(Vec3::splat(1.0)))),
+            mesh: meshes.add(Mesh::from(Cuboid::from_size(Vec3::new(1.0, pillar_height, 1.0)))),
             material: mats.add(Color::srgb(0.9, 0.2, 0.2)),
-            transform: Transform::from_xyz(6.0, 0.5, 7.0),
+            // center the pillar so half its height is above ground
+            transform: Transform::from_xyz(
+                target_x,
+                target_ground + pillar_height * 0.5,
+                target_z,
+            ),
             ..default()
         })
+        .insert(Target)
         .insert(RigidBody::Fixed)
-        .insert(Collider::cuboid(0.5, 0.5, 0.5));
+        .insert(Collider::cuboid(0.5, pillar_height * 0.5, 0.5));
 }
 
 fn simple_ball_physics(
