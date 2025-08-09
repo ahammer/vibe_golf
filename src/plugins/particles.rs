@@ -1,6 +1,6 @@
-// Particle & FX systems for atmosphere dust, impact dust clouds, target explosions, and game-over confetti.
+// Particle & FX systems now using candy_1 / candy_2 glb models for burst/explosion/confetti effects.
 use bevy::prelude::*;
-use bevy::math::primitives::{Sphere, Cuboid};
+use bevy::math::primitives::Sphere;
 use rand::prelude::*;
 
 pub struct ParticlePlugin;
@@ -34,10 +34,10 @@ pub const BOUNCE_EFFECT_INTENSITY_MIN: f32 = 2.0;
 // Internal particle variants
 #[derive(Component)]
 enum ParticleKind {
-    DustAtmos,      // persistent atmospheric dust (recycled)
-    DustBurst,      // short dust puff on ground impact
-    Explosion,      // bright fast particles
-    Confetti,       // falling colorful squares
+    DustAtmos,      // persistent atmospheric dust (recycled primitive spheres)
+    DustBurst,      // short dust puff on ground impact (candy models now)
+    Explosion,      // bright fast particles (candy models)
+    Confetti,       // game-over candy rain (candy models)
 }
 
 #[derive(Component)]
@@ -72,10 +72,7 @@ impl Default for AtmosDustConfig {
 
 #[derive(Resource)]
 pub struct ParticleMaterials {
-    dust: Handle<StandardMaterial>,
-    dust_burst: Handle<StandardMaterial>,
-    explosion: Handle<StandardMaterial>,
-    confetti_colors: Vec<Handle<StandardMaterial>>,
+    dust: Handle<StandardMaterial>, // only used for atmospheric dust now
 }
 
 impl FromWorld for ParticleMaterials {
@@ -87,32 +84,24 @@ impl FromWorld for ParticleMaterials {
             metallic: 0.0,
             ..default()
         });
-        let dust_burst = materials.add(StandardMaterial {
-            base_color: Color::srgba(0.90, 0.85, 0.75, 0.55),
-            perceptual_roughness: 1.0,
-            ..default()
-        });
-        let explosion = materials.add(StandardMaterial {
-            base_color: Color::srgba(1.0, 0.65, 0.2, 0.85),
-            emissive: LinearRgba::new(4.0, 2.0, 0.6, 1.0),
-            ..default()
-        });
-        let confetti_palette = [
-            Color::srgba(0.95, 0.2, 0.2, 1.0),
-            Color::srgba(0.2, 0.95, 0.3, 1.0),
-            Color::srgba(0.2, 0.4, 0.95, 1.0),
-            Color::srgba(0.95, 0.9, 0.2, 1.0),
-            Color::srgba(0.9, 0.2, 0.85, 1.0),
-        ];
-        let mut confetti_colors = Vec::new();
-        for c in confetti_palette {
-            confetti_colors.push(materials.add(StandardMaterial {
-                base_color: c,
-                double_sided: true,
-                ..default()
-            }));
+        Self { dust }
+    }
+}
+
+// Candy model handles
+#[derive(Resource)]
+pub struct CandyModels {
+    candy: [Handle<Scene>; 2],
+}
+impl FromWorld for CandyModels {
+    fn from_world(world: &mut World) -> Self {
+        let assets = world.resource::<AssetServer>();
+        Self {
+            candy: [
+                assets.load("models/candy_1.glb#Scene0"),
+                assets.load("models/candy_2.glb#Scene0"),
+            ],
         }
-        Self { dust, dust_burst, explosion, confetti_colors }
     }
 }
 
@@ -120,6 +109,7 @@ impl Plugin for ParticlePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(AtmosDustConfig::default())
             .init_resource::<ParticleMaterials>()
+            .init_resource::<CandyModels>()
             .add_event::<BallGroundImpactEvent>()
             .add_event::<TargetHitEvent>()
             .add_event::<GameOverEvent>()
@@ -135,7 +125,7 @@ impl Plugin for ParticlePlugin {
     }
 }
 
-// -------- Atmospheric Dust (persistent) --------
+// -------- Atmospheric Dust (persistent primitive spheres) --------
 fn setup_atmospheric_dust(
     mut commands: Commands,
     cfg: Res<AtmosDustConfig>,
@@ -143,7 +133,6 @@ fn setup_atmospheric_dust(
     mats: Res<ParticleMaterials>,
 ) {
     let mut rng = StdRng::from_entropy();
-    // Small sphere mesh reused
     let dust_mesh = meshes.add(Mesh::from(Sphere { radius: 0.18 }));
     for _ in 0..cfg.count {
         let x = rng.gen_range(-cfg.half_extent..=cfg.half_extent);
@@ -161,8 +150,7 @@ fn setup_atmospheric_dust(
     }
 }
 
- 
-// We need a dedicated query; re-implement with filtering.
+// Recycle rising atmospheric dust
 fn recycle_atmospheric_dust(
     mut q: Query<&mut Transform, (With<ParticleKind>, Without<Particle>)>,
     cfg: Res<AtmosDustConfig>,
@@ -177,20 +165,27 @@ fn recycle_atmospheric_dust(
     }
 }
 
-// -------- Impact Dust --------
+// Helper: pick candy handle
+fn random_candy<'a>(rng: &mut impl Rng, candy: &'a [Handle<Scene>; 2]) -> Handle<Scene> {
+    if rng.gen_bool(0.5) {
+        candy[0].clone()
+    } else {
+        candy[1].clone()
+    }
+}
+
+// -------- Impact Dust (now candy chunks) --------
 fn spawn_dust_on_impact(
     mut ev: EventReader<BallGroundImpactEvent>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mats: Res<ParticleMaterials>,
+    candy_models: Res<CandyModels>,
 ) {
-    let mesh = meshes.add(Mesh::from(Sphere { radius: 0.15 }));
     for e in ev.read() {
         if e.intensity < BOUNCE_EFFECT_INTENSITY_MIN { continue; }
         let count = (6.0 + e.intensity * 4.0).clamp(6.0, 40.0) as usize;
         let mut rng = thread_rng();
         for _ in 0..count {
-            // random outward direction (hemisphere)
+            // random outward hemisphere direction
             let dir = {
                 let mut d;
                 loop {
@@ -200,18 +195,25 @@ fn spawn_dust_on_impact(
                 d.normalize()
             };
             let speed = rng.gen_range(0.5..2.5) * (0.4 + e.intensity * 0.6);
+            let scale = rng.gen_range(0.15..0.30);
             commands.spawn((
-                PbrBundle {
-                    mesh: mesh.clone(),
-                    material: mats.dust_burst.clone(),
-                    transform: Transform::from_translation(e.pos + Vec3::Y * 0.05),
+                SceneBundle {
+                    scene: random_candy(&mut rng, &candy_models.candy),
+                    transform: Transform::from_translation(e.pos + Vec3::Y * 0.05)
+                        .with_scale(Vec3::splat(scale))
+                        .with_rotation(Quat::from_euler(
+                            EulerRot::XYZ,
+                            rng.gen_range(0.0..std::f32::consts::TAU),
+                            rng.gen_range(0.0..std::f32::consts::TAU),
+                            rng.gen_range(0.0..std::f32::consts::TAU),
+                        )),
                     ..default()
                 },
                 ParticleKind::DustBurst,
                 Particle {
                     lifetime: rng.gen_range(0.6..1.2),
                     age: 0.0,
-                    fade: true,
+                    fade: false, // not fading candy
                     gravity: -2.5,
                     vel: dir * speed,
                     angular_vel: Vec3::new(
@@ -225,14 +227,12 @@ fn spawn_dust_on_impact(
     }
 }
 
-// -------- Target Explosion --------
+// -------- Target Explosion (candy shrapnel) --------
 fn spawn_explosion_on_hit(
     mut ev: EventReader<TargetHitEvent>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mats: Res<ParticleMaterials>,
+    candy_models: Res<CandyModels>,
 ) {
-    let mesh = meshes.add(Mesh::from(Sphere { radius: 0.25 }));
     for e in ev.read() {
         let mut rng = thread_rng();
         let count = 60;
@@ -246,18 +246,25 @@ fn spawn_explosion_on_hit(
                 d.normalize()
             };
             let speed = rng.gen_range(5.0..14.0);
+            let scale = rng.gen_range(0.20..0.40);
             commands.spawn((
-                PbrBundle {
-                    mesh: mesh.clone(),
-                    material: mats.explosion.clone(),
-                    transform: Transform::from_translation(e.pos),
+                SceneBundle {
+                    scene: random_candy(&mut rng, &candy_models.candy),
+                    transform: Transform::from_translation(e.pos)
+                        .with_scale(Vec3::splat(scale))
+                        .with_rotation(Quat::from_euler(
+                            EulerRot::XYZ,
+                            rng.gen_range(0.0..std::f32::consts::TAU),
+                            rng.gen_range(0.0..std::f32::consts::TAU),
+                            rng.gen_range(0.0..std::f32::consts::TAU),
+                        )),
                     ..default()
                 },
                 ParticleKind::Explosion,
                 Particle {
                     lifetime: rng.gen_range(0.5..1.0),
                     age: 0.0,
-                    fade: true,
+                    fade: false,
                     gravity: -9.0,
                     vel: dir * speed,
                     angular_vel: Vec3::new(
@@ -271,22 +278,19 @@ fn spawn_explosion_on_hit(
     }
 }
 
-// -------- Game Over Confetti --------
+// -------- Game Over Confetti (candy rain) --------
 fn spawn_confetti_on_game_over(
     mut ev: EventReader<GameOverEvent>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mats: Res<ParticleMaterials>,
+    candy_models: Res<CandyModels>,
 ) {
-    let mesh = meshes.add(Mesh::from(Cuboid::from_size(Vec3::splat(0.12))));
     for e in ev.read() {
         let mut rng = thread_rng();
-        let count = 400;
+        let count = 300;
         for _ in 0..count {
-            let color_mat = mats.confetti_colors.choose(&mut rng).unwrap().clone();
             let pos = e.pos + Vec3::new(
                 rng.gen_range(-8.0..8.0),
-                rng.gen_range(4.0..12.0),
+                rng.gen_range(4.0..14.0),
                 rng.gen_range(-8.0..8.0),
             );
             let vel = Vec3::new(
@@ -294,11 +298,12 @@ fn spawn_confetti_on_game_over(
                 rng.gen_range(0.5..3.0),
                 rng.gen_range(-2.5..2.5),
             );
+            let scale = rng.gen_range(0.12..0.22);
             commands.spawn((
-                PbrBundle {
-                    mesh: mesh.clone(),
-                    material: color_mat,
+                SceneBundle {
+                    scene: random_candy(&mut rng, &candy_models.candy),
                     transform: Transform::from_translation(pos)
+                        .with_scale(Vec3::splat(scale))
                         .with_rotation(Quat::from_euler(
                             EulerRot::XYZ,
                             rng.gen_range(0.0..std::f32::consts::TAU),
@@ -311,7 +316,7 @@ fn spawn_confetti_on_game_over(
                 Particle {
                     lifetime: rng.gen_range(3.5..6.0),
                     age: 0.0,
-                    fade: true,
+                    fade: false,
                     gravity: -6.0,
                     vel,
                     angular_vel: Vec3::new(
@@ -329,18 +334,16 @@ fn spawn_confetti_on_game_over(
 fn update_particles(
     mut commands: Commands,
     time: Res<Time>,
-    mut q: Query<(Entity, &mut Transform, &mut Particle, &Handle<StandardMaterial>)>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut q: Query<(Entity, &mut Transform, &mut Particle)>,
 ) {
     let dt = time.delta_seconds();
-    for (e, mut t, mut p, mat_handle) in &mut q {
+    for (e, mut t, mut p) in &mut q {
         p.age += dt;
-        let rdt = dt;
         // Integrate motion
-        p.vel.y += p.gravity * rdt;
-        t.translation += p.vel * rdt;
+        p.vel.y += p.gravity * dt;
+        t.translation += p.vel * dt;
         // Simple angular rotation
-        let ang = p.angular_vel * rdt;
+        let ang = p.angular_vel * dt;
         if ang.length_squared() > 0.0 {
             let qrot = Quat::from_euler(EulerRot::XYZ, ang.x, ang.y, ang.z);
             t.rotate_local(qrot);
@@ -349,13 +352,6 @@ fn update_particles(
             commands.entity(e).despawn_recursive();
             continue;
         }
-        if p.fade {
-            let remain = 1.0 - (p.age / p.lifetime);
-            if let Some(mat) = materials.get_mut(mat_handle) {
-                let mut c = mat.base_color.to_linear();
-                c.set_alpha(remain);
-                mat.base_color = c.into();
-            }
-        }
+        // (Fade skipped for glb candy models)
     }
 }

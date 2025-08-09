@@ -1,6 +1,5 @@
 use bevy::prelude::*;
-use bevy::math::primitives::{Cuboid, Sphere};
-use bevy_rapier3d::prelude::*;
+use bevy::math::primitives::Cuboid;
 use crate::plugins::terrain::TerrainSampler;
 use crate::plugins::camera::OrbitCamera;
 use crate::plugins::core_sim::SimState;
@@ -119,6 +118,9 @@ fn save_high_score_time(t: f32) {
 
 pub struct ScenePlugin;
 
+// Floating target vertical offset above terrain
+const TARGET_FLOAT_HEIGHT: f32 = 3.0;
+
 // Generate an inside-facing (inverted) UV sphere suitable for equirectangular sky textures.
 fn generate_inverted_sphere(longitudes: u32, latitudes: u32, radius: f32) -> Mesh {
     let longs = longitudes.max(3);
@@ -226,26 +228,23 @@ fn setup_scene(
         ..default()
     });
 
+    // Ball: meatball.glb scene. Assume original model diameter ~1.0, scale 0.5 -> radius ~0.25.
     let ball_radius = 0.25;
     let x = 0.0;
     let z = 0.0;
     let ground_h = sampler.height(x, z);
     let spawn_y = ground_h + ball_radius + 10.0;
     commands
-        .spawn(PbrBundle {
-            mesh: meshes.add(Mesh::from(Sphere { radius: ball_radius })),
-            material: mats.add(StandardMaterial {
-                base_color: Color::srgb(0.92, 0.93, 0.95),
-                emissive: LinearRgba::new(0.25, 0.35, 0.60, 1.0) * 0.4,
-                perceptual_roughness: 0.35,
-                metallic: 0.0,
+        .spawn((
+            SceneBundle {
+                scene: assets.load("models/meatball.glb#Scene0"),
+                transform: Transform::from_xyz(x, spawn_y, z)
+                    .with_scale(Vec3::splat(0.5)),
                 ..default()
-            }),
-            transform: Transform::from_xyz(x, spawn_y, z),
-            ..default()
-        })
-        .insert(Ball)
-        .insert(BallKinematic { radius: ball_radius, vel: Vec3::ZERO });
+            },
+            Ball,
+            BallKinematic { radius: ball_radius, vel: Vec3::ZERO },
+        ));
 
     // Shot indicator (emissive beam)
     commands
@@ -264,25 +263,24 @@ fn setup_scene(
         })
         .insert(ShotIndicator);
 
-    // Target pillar
+    // Target: floating duck model
     let target_x = 0.0;
     let target_z = 80.0;
-    let pillar_height = 16.0;
     let target_ground = sampler.height(target_x, target_z);
     commands
-        .spawn(PbrBundle {
-            mesh: meshes.add(Mesh::from(Cuboid::from_size(Vec3::new(1.0, pillar_height, 1.0)))),
-            material: mats.add(Color::srgb(0.9, 0.2, 0.2)),
-            transform: Transform::from_xyz(
-                target_x,
-                target_ground + pillar_height * 0.5,
-                target_z,
-            ),
-            ..default()
-        })
-        .insert(Target)
-        .insert(RigidBody::Fixed)
-        .insert(Collider::cuboid(0.5, pillar_height * 0.5, 0.5));
+        .spawn((
+            SceneBundle {
+                scene: assets.load("models/ducky.glb#Scene0"),
+                transform: Transform::from_xyz(
+                    target_x,
+                    target_ground + TARGET_FLOAT_HEIGHT,
+                    target_z,
+                )
+                .with_scale(Vec3::splat(1.0)),
+                ..default()
+            },
+            Target,
+        ));
 }
 
 fn simple_ball_physics(
@@ -613,9 +611,8 @@ fn detect_target_hits(
         let mut new_z = ring * angle.sin();
         new_x = new_x.clamp(-chunk_half, chunk_half);
         new_z = new_z.clamp(-chunk_half, chunk_half);
-        let pillar_half_height = target_t.scale.y * 0.5;
         let ground = sampler.height(new_x, new_z);
-        target_t.translation = Vec3::new(new_x, ground + pillar_half_height, new_z);
+        target_t.translation = Vec3::new(new_x, ground + TARGET_FLOAT_HEIGHT, new_z);
     }
 }
 
@@ -651,8 +648,7 @@ fn reset_game(
     if let Ok(mut tt) = q_target.get_single_mut() {
         let target_x = 0.0;
         let target_z = 80.0;
-        let pillar_height = 16.0;
         let ground = sampler.height(target_x, target_z);
-        tt.translation = Vec3::new(target_x, ground + pillar_height * 0.5, target_z);
+        tt.translation = Vec3::new(target_x, ground + TARGET_FLOAT_HEIGHT, target_z);
     }
 }
