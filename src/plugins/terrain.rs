@@ -2,7 +2,8 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 use noise::{NoiseFn, Perlin};
 use bevy::render::mesh::PrimitiveTopology;
-use crate::plugins::contour_material::{ContourMaterial, topo_palette};
+use bevy::pbr::{ExtendedMaterial, StandardMaterial};
+use crate::plugins::contour_material::{ContourExtension, topo_palette};
 
 /// Configuration for procedural terrain height sampling & mesh generation.
 #[derive(Resource, Clone)]
@@ -154,7 +155,7 @@ fn generate_single_chunk(
     mut commands: Commands,
     sampler: Res<TerrainSampler>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut contour_mats: ResMut<Assets<ContourMaterial>>,
+    mut contour_mats: ResMut<Assets<ExtendedMaterial<StandardMaterial, ContourExtension>>>,
 ) {
     let cfg = &sampler.cfg;
     let res = cfg.resolution;
@@ -271,20 +272,26 @@ fn generate_single_chunk(
     mesh.insert_indices(bevy::render::mesh::Indices::U32(indices));
     let mesh_handle = meshes.add(mesh);
 
-    // Build contour material (animated shader) with palette + dynamic height range
+    // Build extended material (PBR + contour extension) so we retain lighting & shadows.
     let (palette_arr, palette_len) = topo_palette();
-    let mut contour_mat = ContourMaterial::default();
-    contour_mat.params.min_height = min_h;
-    contour_mat.params.max_height = max_h;
-    contour_mat.params.interval = 0.5;      // contour spacing (world height units)
-    contour_mat.params.thickness = 0.06;    // line half-thickness factor
-    contour_mat.params.scroll_speed = 0.10; // vertical drift speed
-    contour_mat.params.darken = 0.88;       // global darken multiplier
-    contour_mat.params.palette_len = palette_len;
+    let mut ext = ContourExtension::default();
+    ext.data.min_height = min_h;
+    ext.data.max_height = max_h;
+    ext.data.interval = 0.5;      // contour spacing (world units)
+    ext.data.thickness = 0.06;    // line thickness factor (soft falloff)
+    ext.data.scroll_speed = 0.10; // animation speed
+    ext.data.darken = 0.88;       // global darken
+    ext.data.palette_len = palette_len;
     for i in 0..palette_len as usize {
-        contour_mat.palette.colors[i] = palette_arr[i];
+        ext.data.colors[i] = palette_arr[i];
     }
-    let material = contour_mats.add(contour_mat);
+    let base = StandardMaterial {
+        base_color: Color::WHITE, // replaced in shader with band color pre-lighting
+        perceptual_roughness: 0.9,
+        metallic: 0.0,
+        ..default()
+    };
+    let material = contour_mats.add(ExtendedMaterial { base, extension: ext });
 
     // Heightfield collider (Rapier expects rows * cols)
     let nrows = (res + 1) as usize;
