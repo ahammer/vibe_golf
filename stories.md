@@ -11,17 +11,8 @@ Release groupings are illustrative (can reorder if dependencies shift).
 <!-- P0 Automated Screenshot Capture implemented (screenshot.rs plugin, --no-screenshot flag) and removed from active backlog. -->
 
 ### P0: Reinstate Fixed 60 Hz Gameplay Tick
-As a gameplay engineer I want a deterministic fixed simulation tick separate from variable render frames to ensure reproducible physics authoring & tests.
-AC:
-- Introduce `Time::<Fixed>::from_hz(60.0)` schedule (`FixedUpdate`).
-- Move autoplay impulse + telemetry tick increment into `FixedUpdate` systems.
-- `SimState` restored to track `tick: u64` (primary), plus optional derived elapsed seconds = `tick / 60.0`.
-- Rendering / HUD / camera remain in `Update`.
-- Existing autoplay behavior (interval-based swings) unchanged perceptually.
-- Unit test updated: advancing 5 fixed steps increments tick by 5.
-Notes:
-- Keep `elapsed_seconds` if still helpful; but single writer remains in a fixed system.
-- Provide migration comment at top of file referencing architecture doc alignment.
+<!-- As a gameplay engineer I want a deterministic fixed simulation tick separate from variable render frames to ensure reproducible physics authoring & tests. Done -->
+
 
 ### P1: Modularize Current Systems Into Plugins
 As a maintainer I want the monolith split so new features land in cohesive modules.

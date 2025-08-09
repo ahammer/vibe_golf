@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy::render::view::screenshot::ScreenshotManager;
 
-use crate::{SimState, AutoConfig};
+use crate::plugins::core_sim::{SimState, AutoConfig};
 
 #[derive(Resource)]
 pub struct ScreenshotConfig {
@@ -37,7 +37,7 @@ impl Plugin for ScreenshotPlugin {
 
 fn cleanup_previous_screenshots(cfg: Option<Res<ScreenshotConfig>>) {
     let Some(cfg) = cfg else { return; };
-    if !cfg.enabled { return; }
+    if !cfg.enabled { return; };
     if let Some(dir) = Path::new(&cfg.first_frame_path).parent() {
         if let Ok(entries) = fs::read_dir(dir) {
             let mut removed = 0u32;
