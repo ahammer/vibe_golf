@@ -121,25 +121,22 @@ fn generate_single_chunk(
     let mut normals: Vec<[f32; 3]> = Vec::with_capacity(verts_count);
     let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(verts_count);
 
-    // Precompute heights grid
+    // Heights grid (row-major z=j, x=i) and also store for heightfield.
     let mut heights: Vec<f32> = Vec::with_capacity(verts_count);
     for j in 0..=res {
         for i in 0..=res {
-            let x = -half + i as f32 * step;
-            let z = -half + j as f32 * step;
-            heights.push(sampler.height(x, z));
+            let world_x = -half + i as f32 * step;
+            let world_z = -half + j as f32 * step;
+            heights.push(sampler.height(world_x, world_z));
         }
     }
 
-    // Build positions + normals
+    // Visual mesh centered at origin; we use local grid coordinates then translate entity by (-half,0,-half).
     for j in 0..=res {
         for i in 0..=res {
             let idx = (j * (res + 1) + i) as usize;
-            let x = -half + i as f32 * step;
-            let z = -half + j as f32 * step;
             let h = heights[idx];
 
-            // Finite diff neighbors (clamp edges)
             let i_l = if i == 0 { i } else { i - 1 };
             let i_r = if i == res { i } else { i + 1 };
             let j_d = if j == 0 { j } else { j - 1 };
@@ -152,7 +149,9 @@ fn generate_single_chunk(
             let dz = h_d - h_u;
             let n = Vec3::new(dx, 2.0 * step, dz).normalize_or_zero();
 
-            positions.push([x, h, z]);
+            let local_x = i as f32 * step;
+            let local_z = j as f32 * step;
+            positions.push([local_x, h, local_z]);
             normals.push([n.x, n.y, n.z]);
             uvs.push([i as f32 / res as f32, j as f32 / res as f32]);
         }
@@ -167,47 +166,33 @@ fn generate_single_chunk(
             let i1 = i0 + 1;
             let i2 = i0 + row;
             let i3 = i2 + 1;
-            // Two triangles (i0,i2,i1) (i1,i2,i3) for consistent normal orientation
             indices.extend_from_slice(&[i0, i2, i1, i1, i2, i3].map(|v| v as u32));
         }
     }
 
-    // Create Bevy mesh
+    // Mesh
     let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, Default::default());
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-    mesh.insert_indices(bevy::render::mesh::Indices::U32(indices.clone()));
+    mesh.insert_indices(bevy::render::mesh::Indices::U32(indices));
     let mesh_handle = meshes.add(mesh);
-
     let material = mats.add(Color::srgb(0.22, 0.50, 0.22));
 
-    // Rapier collider (trimesh)
-    // Convert positions & indices into collider format
-    let collider_vertices: Vec<Vec3> = meshes
-        .get(&mesh_handle)
-        .unwrap()
-        .attribute(Mesh::ATTRIBUTE_POSITION)
-        .unwrap()
-        .as_float3()
-        .unwrap()
-        .iter()
-        .map(|[x, y, z]| Vec3::new(*x, *y, *z))
-        .collect();
-
-    // Indices already collected
-    let mut tri_indices: Vec<[u32; 3]> = Vec::with_capacity(indices.len() / 3);
-    for tri in indices.chunks_exact(3) {
-        tri_indices.push([tri[0], tri[1], tri[2]]);
-    }
+    // Heightfield collider (Rapier expects rows * cols)
+    let nrows = (res + 1) as usize;
+    let ncols = (res + 1) as usize;
+    let collider = Collider::heightfield(heights, nrows, ncols, Vec3::new(step, 1.0, step));
 
     commands
         .spawn(PbrBundle {
             mesh: mesh_handle,
             material,
-            transform: Transform::IDENTITY,
+            transform: Transform::from_xyz(-half, 0.0, -half),
             ..default()
         })
-        .insert(Collider::trimesh(collider_vertices, tri_indices))
+        .insert(RigidBody::Fixed)
+        .insert(collider)
+        .insert(Friction { coefficient: 1.0, combine_rule: CoefficientCombineRule::Average })
         .insert(TerrainChunk);
 }

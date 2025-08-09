@@ -55,8 +55,11 @@ fn setup_scene(
         .insert(Ball)
         .insert(RigidBody::Dynamic)
         .insert(Collider::ball(ball_radius))
-        .insert(Restitution::coefficient(0.6))
-        .insert(Damping { linear_damping: 0.05, angular_damping: 0.05 });
+        .insert(Friction { coefficient: 0.6, combine_rule: CoefficientCombineRule::Average })
+        .insert(Restitution::coefficient(0.0))
+        .insert(Damping { linear_damping: 0.20, angular_damping: 0.05 })
+        .insert(Ccd::enabled())
+        .insert(Sleeping::disabled());
 
     // target cube
     commands

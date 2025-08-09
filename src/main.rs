@@ -33,7 +33,7 @@ fn main() {
             ..default()
         }))
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
-        // .add_plugins(RapierDebugRenderPlugin::default())
+        .add_plugins(RapierDebugRenderPlugin::default())
         .add_plugins(CoreSimPlugin)      // timing + shared resources
         .add_plugins(TerrainPlugin)      // procedural terrain
         .add_plugins(ScenePlugin)        // world & entities

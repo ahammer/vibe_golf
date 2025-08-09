@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::time::Fixed;
+use bevy_rapier3d::prelude::{Velocity, RigidBody};
 
 // Core simulation timing & shared gameplay configuration/types.
 #[derive(Resource, Default, Debug)]
@@ -23,7 +24,7 @@ pub struct AutoConfig {
 }
 impl Default for AutoConfig {
     fn default() -> Self {
-        Self { run_duration_seconds: 20.0, swing_interval_seconds: 3.0, base_impulse: 6.0, upward_factor: 0.15 }
+        Self { run_duration_seconds: 20.0, swing_interval_seconds: 3.0, base_impulse: 6.0, upward_factor: 0.0 }
     }
 }
 
@@ -40,11 +41,24 @@ impl Plugin for CoreSimPlugin {
             .insert_resource(AutoRuntime::default())
             .insert_resource(LogState::default())
             .insert_resource(Time::<Fixed>::from_hz(60.0))
-            .add_systems(FixedUpdate, tick_state);
+            .add_systems(FixedUpdate, tick_state)
+            .add_systems(Update, apply_custom_gravity);
     }
 }
 
 fn tick_state(mut sim: ResMut<SimState>) { sim.advance_fixed(); }
+
+fn apply_custom_gravity(mut q: Query<(&RigidBody, &mut Velocity)>) {
+    // Manual gravity because default Rapier gravity appears absent.
+    let dt = 1.0 / 60.0;
+    let g = -9.81;
+    for (rb, mut vel) in q.iter_mut() {
+        if matches!(*rb, RigidBody::Dynamic) {
+            vel.linvel.y += g * dt;
+        }
+    }
+}
+
 
 pub use AutoConfig as AutoConfigExport;
 pub use SimState as SimStateExport;
