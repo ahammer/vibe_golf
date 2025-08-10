@@ -284,14 +284,17 @@ fn populate_chunk_vegetation(
                 attempts += 1;
                 let rx: f32 = random();
                 let rz: f32 = random();
-                let x = base.x + rx * cfg.chunk_size;
-                let z = base.z + rz * cfg.chunk_size;
-                let h = sampler.height(x, z);
-                let n = sampler.normal(x, z);
+                // Compute local (chunk‑relative) and world positions separately.
+                let local_x = rx * cfg.chunk_size;
+                let local_z = rz * cfg.chunk_size;
+                let world_x = base.x + local_x;
+                let world_z = base.z + local_z;
+                let h = sampler.height(world_x, world_z);
+                let n = sampler.normal(world_x, world_z);
                 if n.y < 0.60 { // avoid steeper slopes
                     continue;
                 }
-                let macro_v = sampler.macro_value(x, z);
+                let macro_v = sampler.macro_value(world_x, world_z);
                 // Compute valley & mountain factors
                 let m_start = cfg.mountain_start;
                 let m_end = cfg.mountain_end;
@@ -320,7 +323,8 @@ fn populate_chunk_vegetation(
                 c.spawn((
                     SceneBundle {
                         scene: assets.load(model),
-                        transform: Transform::from_xyz(x, h, z)
+                        // Use chunk‑local translation so parenting does NOT double-apply chunk origin.
+                        transform: Transform::from_xyz(local_x, h, local_z)
                             .with_scale(Vec3::splat(scale))
                             .with_rotation(Quat::from_rotation_y(random::<f32>() * std::f32::consts::TAU)),
                         ..default()
@@ -335,14 +339,19 @@ fn populate_chunk_vegetation(
 
 fn align_vegetation(
     sampler: Res<TerrainSampler>,
-    mut q_added: Query<&mut Transform, (With<VegetationInstance>, Added<VegetationInstance>)>,
+    q_globals: Query<&GlobalTransform>,
+    mut q_added: Query<(&Parent, &mut Transform), (With<VegetationInstance>, Added<VegetationInstance>)>,
 ) {
-    for mut t in &mut q_added {
-        let x = t.translation.x;
-        let z = t.translation.z;
-        let h = sampler.height(x, z);
+    for (parent, mut t) in &mut q_added {
+        // Convert chunk-local (child) position to world for sampling.
+        let parent_gt = q_globals.get(parent.get()).ok();
+        let parent_pos = parent_gt.map(|g| g.translation()).unwrap_or(Vec3::ZERO);
+        let world_x = parent_pos.x + t.translation.x;
+        let world_z = parent_pos.z + t.translation.z;
+
+        let h = sampler.height(world_x, world_z);
         t.translation.y = h;
-        let n = sampler.normal(x, z);
+        let n = sampler.normal(world_x, world_z);
 
         // Limit tilt for stylization (max ~17 degrees)
         let max_tilt = 0.30_f32;
