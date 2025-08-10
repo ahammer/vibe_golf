@@ -50,16 +50,16 @@ impl Default for TerrainConfig {
     fn default() -> Self {
         Self {
             seed: 1337,
-            amplitude: 6.0,
+            amplitude: 4.0, // Reduced to soften overall vertical scale
             frequency: 0.08,
             octaves: 4,
             lacunarity: 2.0,
             gain: 0.5,
             base_frequency: 0.010,
-            detail_frequency: 0.045,
-            detail_octaves: 5,
+            detail_frequency: 0.030, // Lower high‑freq detail to reduce sharp cliffs
+            detail_octaves: 3,       // Fewer octaves = smoother
             warp_frequency: 0.020,
-            warp_amplitude: 6.0,
+            warp_amplitude: 3.0,     // Less domain warp = gentler transitions
             // Reduced chunk size & resolution to allow many chunks with similar total vertex counts.
             chunk_size: 160.0,
             resolution: 96,
@@ -75,7 +75,7 @@ impl Default for TerrainConfig {
             rim_peak: 150.0,
             rim_height: 10.0,
             vegetation_per_chunk: 40,
-            mountain_height: 20.0,
+            mountain_height: 10.0,   // Lower mountain uplift
             valley_depth: 8.0,
         }
     }
@@ -125,7 +125,8 @@ impl TerrainSampler {
         let valley_t = smooth(cfg.valley_end, cfg.valley_start, macro_v); // reversed (higher when macro_v lower)
 
         // Scale base undulations: valleys slightly smoother, mountains amplify relief
-        let relief_scale = 0.70 + 0.40 * mountain_t + 0.20 * valley_t;
+        // Soften relief variation: higher base, lower amplification in mountains/valleys
+        let relief_scale = 0.80 + 0.25 * mountain_t + 0.15 * valley_t;
 
         // Add large scale offsets: uplift mountains, depress valleys
         let uplift = mountain_t.powf(1.15) * cfg.mountain_height;
