@@ -2,7 +2,11 @@ use bevy::prelude::*;
 use bevy::app::AppExit;
 use bevy::time::Fixed;
 use bevy_rapier3d::prelude::{Velocity, RigidBody};
+use bevy::pbr::NotShadowCaster;
+use std::collections::HashSet;
 use crate::plugins::game_state::Score;
+use crate::plugins::terrain::LoadedChunks;
+use crate::plugins::vegetation::Tree;
 
 // Core simulation timing & shared gameplay configuration/types.
 #[derive(Resource, Default, Debug)]
@@ -78,9 +82,28 @@ fn exit_after_runtime(
     auto: Res<AutoConfig>,
     mut exit_state: ResMut<ExitState>,
     mut ev_exit: EventWriter<AppExit>,
+    loaded_chunks: Option<Res<LoadedChunks>>,
+    q_tree_mesh: Query<(&Handle<Mesh>, &Handle<StandardMaterial>, Option<&NotShadowCaster>, &Visibility), With<Tree>>,
 ) {
     if exit_state.triggered { return; }
     if sim.elapsed_seconds >= auto.run_duration_seconds {
+        // OPT instrumentation: one-time final stats summary (chunks, trees, batches)
+        let chunk_count = loaded_chunks.as_ref().map(|lc| lc.map.len()).unwrap_or(0);
+        let mut unique: HashSet<(Handle<Mesh>, Handle<StandardMaterial>, bool)> = HashSet::new();
+        let mut visible_trees = 0usize;
+        for (mesh, mat, shadow_flag, vis) in &q_tree_mesh {
+            if *vis != Visibility::Hidden {
+                visible_trees += 1;
+                unique.insert((mesh.clone(), mat.clone(), shadow_flag.is_none()));
+            }
+        }
+        info!(
+            "FINAL_STATS chunks={} visible_trees={} approx_unique_tree_batches={} sim_seconds={}",
+            chunk_count,
+            visible_trees,
+            unique.len(),
+            sim.elapsed_seconds
+        );
         info!("EXIT runtime reached seconds={}", sim.elapsed_seconds);
         exit_state.triggered = true;
         ev_exit.send(AppExit::Success);

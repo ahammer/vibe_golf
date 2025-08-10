@@ -161,11 +161,12 @@ pub struct VegetationCullingConfig {
 }
 impl Default for VegetationCullingConfig {
     fn default() -> Self {
+        // OPT-01: Enable distance culling with a tuned initial radius (start high-ish; tuner will adapt).
         Self {
-            max_distance: 1200.0,
+            max_distance: 220.0,
             hysteresis: 14.0,
             update_interval: 0.33,
-            enable_distance: false,
+            enable_distance: true,
         }
     }
 }
@@ -185,10 +186,11 @@ pub struct VegetationLodConfig {
 }
 impl Default for VegetationLodConfig {
     fn default() -> Self {
+        // OPT-02: Reduce shadow radius & widen hysteresis slightly to lessen shadow caster count.
         Self {
-            shadows_full_on: 110.0,
-            shadows_full_off: 135.0,
-            hysteresis: 6.0,
+            shadows_full_on: 80.0,
+            shadows_full_off: 110.0,
+            hysteresis: 8.0,
             update_interval: 0.25,
         }
     }
@@ -219,20 +221,21 @@ struct VegetationPerfTuner {
 }
 impl Default for VegetationPerfTuner {
     fn default() -> Self {
+        // Align tuner defaults & bounds with OPT-01 / OPT-02 initial settings.
         Self {
             timer: Timer::from_seconds(0.6, TimerMode::Repeating),
             target_fps: 120.0,
             low_band: 0.92,
             high_band: 1.05,
             default_cull: 200.0,
-            default_shadow_on: 110.0,
-            default_shadow_off: 135.0,
+            default_shadow_on: 80.0,
+            default_shadow_off: 110.0,
             min_cull: 130.0,
             max_cull: 240.0,
-            min_shadow_on: 60.0,
-            max_shadow_on: 140.0,
-            min_shadow_off: 80.0,
-            max_shadow_off: 200.0,
+            min_shadow_on: 55.0,
+            max_shadow_on: 120.0,
+            min_shadow_off: 70.0,
+            max_shadow_off: 160.0,
             adjust_step: 6.0,
         }
     }

@@ -63,7 +63,7 @@ impl Default for TerrainConfig {
             warp_amplitude: 3.0,
             chunk_size: 160.0,
             resolution: 96,
-            view_radius_chunks: 8, // increased for farther terrain retention (was 4)
+            view_radius_chunks: 6, // OPT-03: reduced from 8 -> 6 (~41% fewer potential resident chunks; was 8 for farther retention)
             max_spawn_per_frame: 16, // spawn more chunks per frame to fill extended radius faster (was 8)
             macro_frequency: 0.0025,
             mountain_start: 0.62,
@@ -293,7 +293,7 @@ fn spawn_chunk_task(commands: &mut Commands, coord: IVec2, sampler: TerrainSampl
         let mut positions: Vec<[f32; 3]> = Vec::with_capacity(verts_count);
         let mut normals: Vec<[f32; 3]> = Vec::with_capacity(verts_count);
         let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(verts_count);
-        let mut colors: Vec<[f32; 4]> = Vec::with_capacity(verts_count);
+        // OPT-05: Removed per-vertex baked color buffer (now computed fully in shader; saves vertex bandwidth & build CPU).
         let mut heights: Vec<f32> = Vec::with_capacity(verts_count);
 
         let origin_x = coord.x as f32 * size;
@@ -332,37 +332,7 @@ fn spawn_chunk_task(commands: &mut Commands, coord: IVec2, sampler: TerrainSampl
                 normals.push([n.x, n.y, n.z]);
                 uvs.push([i as f32 / res as f32, j as f32 / res as f32]);
 
-                let h_norm = if max_h > min_h { (h - min_h) / (max_h - min_h) } else { 0.0 };
-                let palette: [Vec3; 7] = [
-                    Vec3::new(0.06, 0.20, 0.18),
-                    Vec3::new(0.12, 0.32, 0.22),
-                    Vec3::new(0.32, 0.46, 0.24),
-                    Vec3::new(0.55, 0.58, 0.34),
-                    Vec3::new(0.63, 0.55, 0.38),
-                    Vec3::new(0.52, 0.42, 0.34),
-                    Vec3::new(0.55, 0.55, 0.55),
-                ];
-                let bands = (palette.len() - 1) as f32;
-                let scaled = h_norm * bands;
-                let band_idx = scaled.floor().clamp(0.0, bands - 1.0) as usize;
-                let t_band = (scaled - band_idx as f32).clamp(0.0, 1.0);
-                let base_col = palette[band_idx].lerp(palette[band_idx + 1], t_band);
-
-                let contour_interval = 1.0_f32;
-                let contour_thickness = 0.12_f32;
-                let h_mod = (h / contour_interval).fract();
-                let d_line = h_mod.min(1.0 - h_mod);
-                let line_strength =
-                    (1.0 - (d_line / contour_thickness)).clamp(0.0, 1.0).powf(1.5);
-
-                let slope_factor = n.y.clamp(0.0, 1.0).powf(0.8);
-                let slope_dark = 0.85 + 0.15 * slope_factor;
-
-                let ink = Vec3::new(0.15, 0.12, 0.10);
-                let contour_col = base_col.lerp(ink, line_strength * 0.85);
-                let final_col = contour_col * slope_dark * 0.92;
-
-                colors.push([final_col.x, final_col.y, final_col.z, 1.0]);
+                // OPT-05: Removed baked vertex color generation (now derived in contour shader using world position & normals).
             }
         }
 
@@ -382,7 +352,7 @@ fn spawn_chunk_task(commands: &mut Commands, coord: IVec2, sampler: TerrainSampl
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+        // OPT-05: COLOR attribute omitted to reduce vertex size.
         mesh.insert_indices(bevy::render::mesh::Indices::U32(indices));
 
         ChunkBuildResult {
