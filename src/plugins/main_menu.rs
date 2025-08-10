@@ -3,6 +3,7 @@
 
 use bevy::prelude::*;
 use crate::plugins::game_state::Score;
+use crate::plugins::ball::Ball;
 
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GamePhase {
@@ -26,7 +27,28 @@ impl Plugin for MainMenuPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(GamePhase::default())
             .add_systems(Startup, spawn_main_menu)
-            .add_systems(Update, (menu_button_system,));
+            .add_systems(Update, (menu_button_system, monitor_game_over));
+    }
+}
+
+fn monitor_game_over(
+    mut commands: Commands,
+    mut phase: ResMut<GamePhase>,
+    score: Res<Score>,
+    assets: Res<AssetServer>,
+    q_ball: Query<Entity, With<Ball>>,
+    q_menu: Query<Entity, With<MenuRoot>>,
+) {
+    if *phase == GamePhase::Playing && score.game_over {
+        // Despawn any existing balls.
+        for e in q_ball.iter() {
+            commands.entity(e).despawn_recursive();
+        }
+        *phase = GamePhase::Menu;
+        // Re-create menu if it was removed.
+        if q_menu.get_single().is_err() {
+            spawn_main_menu(commands, assets, Some(score));
+        }
     }
 }
 

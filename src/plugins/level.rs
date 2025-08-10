@@ -7,6 +7,7 @@ use std::fs;
 
 use crate::plugins::camera::OrbitCamera;
 use crate::plugins::ball::{Ball, BallKinematic};
+use crate::plugins::main_menu::GamePhase;
 use crate::plugins::target::{Target, TargetFloat, TargetParams};
 use crate::plugins::game_state::{ShotConfig, Score};
 use crate::plugins::terrain::TerrainSampler;
@@ -104,7 +105,7 @@ impl Plugin for LevelPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, load_level)
             .add_systems(Startup, spawn_level.after(load_level))
-            .add_systems(Update, update_wall_fade);
+            .add_systems(Update, (spawn_runtime_ball, update_wall_fade));
     }
 }
 
@@ -174,25 +175,7 @@ fn spawn_level(
         ..default()
     });
 
-    // Ball spawn
-    let ball_pos = Vec3::new(level.ball.pos.x, 0.0, level.ball.pos.z);
-    let ground_h = sampler.height(ball_pos.x, ball_pos.z);
-    let spawn_y = ground_h + level.ball.collider_radius + level.ball.spawn_height_offset;
-    commands.spawn((
-        SceneBundle {
-            scene: assets.load(level.ball.model.clone()),
-            transform: Transform::from_translation(Vec3::new(ball_pos.x, spawn_y, ball_pos.z))
-                .with_scale(Vec3::splat(level.ball.visual_scale)),
-            ..default()
-        },
-        Ball,
-        BallKinematic {
-            collider_radius: level.ball.collider_radius,
-            visual_radius: 0.5 * level.ball.visual_scale, // assumes original diameter ~1.0
-            vel: Vec3::ZERO,
-            angular_vel: Vec3::ZERO,
-        },
-    ));
+    // Ball is spawned lazily when entering gameplay phase (see spawn_runtime_ball).
 
     // Target spawn + params resource
     let t_x = level.target.initial.x;
@@ -279,6 +262,41 @@ fn spawn_level(
     if let Some(ref mut s) = score {
         s.max_holes = level.scoring.max_holes;
     }
+}
+
+fn spawn_runtime_ball(
+    mut commands: Commands,
+    phase: Option<Res<GamePhase>>,
+    level: Option<Res<LevelDef>>,
+    sampler: Option<Res<TerrainSampler>>,
+    assets: Res<AssetServer>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut mats: ResMut<Assets<StandardMaterial>>,
+    q_ball: Query<Entity, With<Ball>>,
+) {
+    if !matches!(phase.map(|p| *p), Some(GamePhase::Playing)) { return; }
+    if q_ball.get_single().is_ok() { return; }
+    let (Some(level), Some(sampler)) = (level, sampler) else { return; };
+
+    let ball_pos = Vec3::new(level.ball.pos.x, 0.0, level.ball.pos.z);
+    let ground_h = sampler.height(ball_pos.x, ball_pos.z);
+    let spawn_y = ground_h + level.ball.collider_radius + level.ball.spawn_height_offset;
+
+    commands.spawn((
+        SceneBundle {
+            scene: assets.load(level.ball.model.clone()),
+            transform: Transform::from_translation(Vec3::new(ball_pos.x, spawn_y, ball_pos.z))
+                .with_scale(Vec3::splat(level.ball.visual_scale)),
+            ..default()
+        },
+        Ball,
+        BallKinematic {
+            collider_radius: level.ball.collider_radius,
+            visual_radius: 0.5 * level.ball.visual_scale,
+            vel: Vec3::ZERO,
+            angular_vel: Vec3::ZERO,
+        },
+    ));
 }
 
 // Fade walls based on proximity to ball
