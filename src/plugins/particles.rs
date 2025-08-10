@@ -90,6 +90,20 @@ impl FromWorld for ParticleMaterials {
     }
 }
 
+ // Snowflake model handle for sky particles
+#[derive(Resource)]
+pub struct SnowflakeModel {
+    handle: Handle<Scene>,
+}
+impl FromWorld for SnowflakeModel {
+    fn from_world(world: &mut World) -> Self {
+        let assets = world.resource::<AssetServer>();
+        Self {
+            handle: assets.load("models/snowflake.glb#Scene0"),
+        }
+    }
+}
+
 // Candy model handles
 #[derive(Resource)]
 pub struct CandyModels {
@@ -174,7 +188,8 @@ fn extract_candy_variants(
 impl Plugin for ParticlePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(AtmosDustConfig::default())
-            .init_resource::<ParticleMaterials>()
+.init_resource::<ParticleMaterials>()
+            .init_resource::<SnowflakeModel>()
             .init_resource::<CandyModels>()
             .insert_resource(CandyMeshVariants::default())
             .add_event::<BallGroundImpactEvent>()
@@ -198,23 +213,36 @@ impl Plugin for ParticlePlugin {
 fn setup_atmospheric_dust(
     mut commands: Commands,
     cfg: Res<AtmosDustConfig>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mats: Res<ParticleMaterials>,
+    snow: Res<SnowflakeModel>,
 ) {
-    let mut rng = StdRng::from_entropy();
-    let dust_mesh = meshes.add(Mesh::from(Sphere { radius: 0.18 }));
+    let mut rng = thread_rng();
     for _ in 0..cfg.count {
         let x = rng.gen_range(-cfg.half_extent..=cfg.half_extent);
-        let y = rng.gen_range(cfg.min_y..=cfg.max_y);
+        let y = rng.gen_range(40.0..80.0); // lowered altitude
         let z = rng.gen_range(-cfg.half_extent..=cfg.half_extent);
+        let max_scale = rng.gen_range(8.75..17.5); // half previous size (was 17.5..35.0)
+        let angular = Vec3::new(
+            rng.gen_range(-0.4..0.4),
+            rng.gen_range(-0.4..0.4),
+            rng.gen_range(-0.4..0.4),
+        );
         commands.spawn((
-            PbrBundle {
-                mesh: dust_mesh.clone(),
-                material: mats.dust.clone(),
-                transform: Transform::from_translation(Vec3::new(x, y, z)),
+            SceneBundle {
+                scene: snow.handle.clone(),
+                transform: Transform::from_translation(Vec3::new(x, y, z))
+                    .with_scale(Vec3::splat(0.0)),
                 ..default()
             },
             ParticleKind::DustAtmos,
+            Particle {
+                lifetime: 20.0,
+                age: 0.0,
+                gravity: 0.0,
+                vel: Vec3::ZERO,
+                angular_vel: angular,
+                start_scale: Vec3::ZERO,
+                end_scale: Vec3::splat(max_scale),
+            },
         ));
     }
 }
@@ -543,10 +571,10 @@ fn spawn_confetti_on_game_over(
 fn update_particles(
     mut commands: Commands,
     time: Res<Time>,
-    mut q: Query<(Entity, &mut Transform, &mut Particle)>,
+    mut q: Query<(Entity, &mut Transform, &mut Particle, &ParticleKind)>,
 ) {
     let dt = time.delta_seconds();
-    for (e, mut t, mut p) in &mut q {
+    for (e, mut t, mut p, kind) in &mut q {
         p.age += dt;
         // Integrate motion (all manual now)
         p.vel.y += p.gravity * dt;
@@ -558,9 +586,20 @@ fn update_particles(
             let qrot = Quat::from_euler(EulerRot::XYZ, ang.x, ang.y, ang.z);
             t.rotate_local(qrot);
         }
-        // Scale over lifetime (dust burst expands, others unchanged if start==end)
+        // Scale over lifetime:
+        // - DustAtmos (sky snowflakes): scale in (0->max) first half, out (max->0) second half
+        // - Others: linear lerp start->end
         let progress = (p.age / p.lifetime).clamp(0.0, 1.0);
-        t.scale = p.start_scale.lerp(p.end_scale, progress);
+        if matches!(kind, ParticleKind::DustAtmos) {
+            let phase = if progress < 0.5 {
+                progress / 0.5
+            } else {
+                (1.0 - progress) / 0.5
+            };
+            t.scale = p.end_scale * phase;
+        } else {
+            t.scale = p.start_scale.lerp(p.end_scale, progress);
+        }
 
         if p.age >= p.lifetime {
             commands.entity(e).despawn_recursive();
