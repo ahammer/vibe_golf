@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::time::Fixed;
 use bevy_rapier3d::prelude::{Velocity, RigidBody};
-use crate::plugins::scene::Score;
+use crate::plugins::game_state::Score;
 
 // Core simulation timing & shared gameplay configuration/types.
 #[derive(Resource, Default, Debug)]

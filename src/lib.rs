@@ -3,7 +3,11 @@
 
 pub mod plugins {
     pub mod core_sim;
-    pub mod scene;
+    pub mod game_state;
+    pub mod level;
+    pub mod ball;
+    pub mod target;
+    pub mod shooting;
     pub mod autoplay;
     pub mod hud;
     pub mod camera;

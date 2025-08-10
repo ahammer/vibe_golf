@@ -23,7 +23,7 @@ use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use noise::{NoiseFn, Perlin};
 use rand::{thread_rng, Rng};
 use crate::plugins::terrain::TerrainSampler;
-use crate::plugins::scene::Ball;
+use crate::plugins::ball::Ball;
 
 pub struct VegetationPlugin;
 impl Plugin for VegetationPlugin {

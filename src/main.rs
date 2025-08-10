@@ -8,7 +8,11 @@ use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
 
 pub mod plugins {
     pub mod core_sim;
-    pub mod scene;
+    pub mod game_state;
+    pub mod level;
+    pub mod ball;
+    pub mod target;
+    pub mod shooting;
     pub mod autoplay;
     pub mod hud;
     pub mod camera;
@@ -20,7 +24,11 @@ pub mod plugins {
     pub mod vegetation;
 }
 use plugins::core_sim::CoreSimPlugin;
-use plugins::scene::ScenePlugin;
+use plugins::game_state::GameStatePlugin;
+use plugins::level::LevelPlugin;
+use plugins::ball::BallPlugin;
+use plugins::target::TargetPlugin;
+use plugins::shooting::ShootingPlugin;
 use plugins::hud::HudPlugin;
 use plugins::camera::CameraPlugin;
 use plugins::terrain::TerrainPlugin;
@@ -47,17 +55,21 @@ fn main() {
             ..default()
         }))
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
-        .add_plugins(CoreSimPlugin)      // timing + shared resources
+        .add_plugins(CoreSimPlugin)         // timing + shared resources
         .add_plugins(ContourMaterialPlugin) // custom contour material (shader)
-        .add_plugins(TerrainPlugin)      // procedural terrain
-        .add_plugins(VegetationPlugin)   // procedural vegetation (trees)
-        .add_plugins(ParticlePlugin)     // particle & FX systems (register events before scene systems use them)
-        .add_plugins(GameAudioPlugin)    // game audio (music + sfx)
-        .add_plugins(ScenePlugin)        // world & entities
-        // .add_plugins(AutoplayPlugin)     // disabled: no impulses, simple vertical drop test
-        .add_plugins(HudPlugin)          // HUD update
-        .add_plugins(CameraPlugin)       // camera follow
-        .add_plugins(ScreenshotPlugin)   // screenshot capture
+        .add_plugins(TerrainPlugin)         // procedural terrain
+        .add_plugins(VegetationPlugin)      // procedural vegetation (trees)
+        .add_plugins(ParticlePlugin)        // particle & FX systems (register events before gameplay systems use them)
+        .add_plugins(GameAudioPlugin)       // game audio (music + sfx)
+        .add_plugins(GameStatePlugin)       // shot state, scoring
+        .add_plugins(LevelPlugin)           // level loading & world entities (camera, sky, walls, spawn ball/target)
+        .add_plugins(BallPlugin)            // ball physics
+        .add_plugins(TargetPlugin)          // target motion + hit detection
+        .add_plugins(ShootingPlugin)        // shooting input & trajectory UI
+        // .add_plugins(AutoplayPlugin)     // disabled: automated swings
+        .add_plugins(HudPlugin)             // HUD (score/time)
+        .add_plugins(CameraPlugin)          // camera follow/orbit
+        .add_plugins(ScreenshotPlugin)      // screenshot capture
         .add_plugins(FrameTimeDiagnosticsPlugin)
         .add_plugins(LogDiagnosticsPlugin::default())
         .run();

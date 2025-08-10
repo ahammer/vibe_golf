@@ -1,13 +1,35 @@
 use bevy::prelude::*;
 
 use crate::plugins::core_sim::SimState;
-use crate::plugins::scene::{Hud, BallKinematic, Score};
+use crate::plugins::ball::BallKinematic;
+use crate::plugins::game_state::Score;
+
+#[derive(Component)]
+pub struct Hud;
 
 pub struct HudPlugin;
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, update_hud);
+        app.add_systems(Startup, spawn_hud_text)
+            .add_systems(Update, update_hud);
     }
+}
+
+fn spawn_hud_text(mut commands: Commands, assets: Res<AssetServer>) {
+    let font = assets.load("fonts/FiraSans-Bold.ttf");
+    commands.spawn((
+        TextBundle::from_section(
+            "Initializing...",
+            TextStyle { font, font_size: 22.0, color: Color::WHITE },
+        )
+        .with_style(Style {
+            position_type: PositionType::Absolute,
+            left: Val::Px(12.0),
+            top: Val::Px(8.0),
+            ..default()
+        }),
+        Hud,
+    ));
 }
 
 fn update_hud(

@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::window::{PrimaryWindow, CursorGrabMode};
-use crate::plugins::scene::Ball;
+use crate::plugins::ball::Ball;
 use crate::plugins::terrain::TerrainSampler;
 
 /// Marker component for the single orbit camera.

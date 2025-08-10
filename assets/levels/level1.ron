@@ -1,0 +1,49 @@
+(
+    camera_start: (x: -12.0, y: 10.0, z: 18.0),
+    camera_look_at: (x: 0.0, y: 0.5, z: 0.0),
+
+    sky: (
+        texture: "skymap/kloppenheim_06_puresky_1k.hdr",
+        radius: 500.0,
+        longitudes: 64,
+        latitudes: 32,
+    ),
+
+    ball: (
+        model: "models/meatball.glb#Scene0",
+        pos: (x: 0.0, z: 0.0),
+        spawn_height_offset: 10.0,
+        collider_radius: 1.25,
+        visual_scale: 0.5,
+    ),
+
+    target: (
+        model: "models/ducky.glb#Scene0",
+        initial: (x: 0.0, z: 80.0),
+        float: (
+            base_height: 30.0,
+            amplitude: 10.0,
+            bob_freq: 0.5,
+            rot_speed: 0.4,
+            collider_radius: 3.0,
+        ),
+    ),
+
+    world: (
+        half_extent: 187.0,
+        wall_height: 120.0,
+        wall_fade_distance: 60.0,
+        wall_restitution: 0.6,
+        wall_color: (0.2, 0.5, 0.9, 0.0),
+    ),
+
+    shot: (
+        osc_speed: 1.6,
+        base_impulse: 18.0,
+        up_angle_deg: 45.0,
+    ),
+
+    scoring: (
+        max_holes: 5,
+    ),
+)

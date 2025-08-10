@@ -3,7 +3,7 @@ use bevy_rapier3d::prelude::*;
 
 use crate::plugins::core_sim::{SimState, AutoConfig, AutoRuntime, LogState};
 use crate::screenshot::{ScreenshotConfig, ScreenshotState};
-use crate::plugins::scene::Ball;
+use crate::plugins::ball::Ball;
 
 pub struct AutoplayPlugin;
 impl Plugin for AutoplayPlugin {
