@@ -63,8 +63,8 @@ impl Default for TerrainConfig {
             warp_amplitude: 3.0,
             chunk_size: 160.0,
             resolution: 96,
-            view_radius_chunks: 4,
-            max_spawn_per_frame: 8,
+            view_radius_chunks: 8, // increased for farther terrain retention (was 4)
+            max_spawn_per_frame: 16, // spawn more chunks per frame to fill extended radius faster (was 8)
             macro_frequency: 0.0025,
             mountain_start: 0.62,
             mountain_end: 0.75,
