@@ -1,9 +1,10 @@
-use bevy::prelude::*;
 use bevy::input::mouse::{MouseMotion, MouseWheel};
-use bevy::window::{PrimaryWindow, CursorGrabMode};
+use bevy::prelude::*;
+use bevy::window::{CursorGrabMode, PrimaryWindow};
+
 use crate::plugins::ball::Ball;
-use crate::plugins::terrain::TerrainSampler;
 use crate::plugins::main_menu::GamePhase;
+use crate::plugins::terrain::TerrainSampler;
 
 /// Marker component for the single orbit camera.
 #[derive(Component)]
@@ -15,6 +16,16 @@ pub struct OrbitCameraState {
     pub yaw: f32,    // radians
     pub pitch: f32,  // radians
     pub radius: f32, // world units
+}
+
+impl Default for OrbitCameraState {
+    fn default() -> Self {
+        Self {
+            yaw: 0.0,
+            pitch: 20f32.to_radians(),
+            radius: 22.0,
+        }
+    }
 }
 
 /// Configuration constants for orbit behavior & constraints.
@@ -29,7 +40,7 @@ pub struct OrbitCameraConfig {
     pub sens_pitch: f32,
     pub target_height_offset: f32,
     pub min_clearance: f32,
-    // Maximum linear speeds (units / second) for speed‑limited lerp
+    // Maximum linear speeds (units / second) for speed‑limited lerp (currently unused; immediate follow).
     pub cam_max_speed: f32,
     pub target_max_speed: f32, // should be >= cam_max_speed (spec: 2x)
 }
@@ -52,16 +63,6 @@ impl Default for OrbitCameraConfig {
     }
 }
 
-impl Default for OrbitCameraState {
-    fn default() -> Self {
-        Self {
-            yaw: 0.0,
-            pitch: 20f32.to_radians(),
-            radius: 22.0,
-        }
-    }
-}
-
 /// Tracks smoothed follow target for camera (speed limited).
 #[derive(Resource)]
 pub struct CameraFollow {
@@ -69,7 +70,9 @@ pub struct CameraFollow {
 }
 impl Default for CameraFollow {
     fn default() -> Self {
-        Self { smoothed_target: Vec3::ZERO }
+        Self {
+            smoothed_target: Vec3::ZERO,
+        }
     }
 }
 
@@ -79,10 +82,25 @@ pub struct OrbitCaptureState {
     pub captured: bool,
 }
 
-/// Menu orbit animation state.
-#[derive(Resource, Default)]
-pub struct MenuCameraOrbit {
-    pub angle: f32,
+/// Endless menu flight animation state.
+/// The camera gently wanders around the origin, changing heading slowly
+/// and keeping within a configurable radius. Creates a feeling of flying
+/// over the world instead of spinning in place.
+#[derive(Resource)]
+pub struct MenuCameraFlight {
+    pub heading: f32,
+    pub pos: Vec3,
+    pub t: f32,
+}
+
+impl Default for MenuCameraFlight {
+    fn default() -> Self {
+        Self {
+            heading: 0.0,
+            pos: Vec3::new(0.0, 14.0, -35.0),
+            t: 0.0,
+        }
+    }
 }
 
 pub struct CameraPlugin;
@@ -92,13 +110,16 @@ impl Plugin for CameraPlugin {
             .insert_resource(OrbitCameraState::default())
             .insert_resource(CameraFollow::default())
             .insert_resource(OrbitCaptureState::default())
-            .insert_resource(MenuCameraOrbit::default())
-            .add_systems(Update, (
-                orbit_camera_capture,
-                orbit_camera_input,
-                menu_camera_orbit,
-                orbit_camera_apply,
-            ));
+            .insert_resource(MenuCameraFlight::default())
+            .add_systems(
+                Update,
+                (
+                    orbit_camera_capture,
+                    orbit_camera_input,
+                    menu_camera_flight,
+                    orbit_camera_apply,
+                ),
+            );
     }
 }
 
@@ -164,25 +185,66 @@ fn orbit_camera_input(
     }
 }
 
-/// Automatic orbit while in main menu (ball absent).
-fn menu_camera_orbit(
+/// Endless flight while in main menu.
+/// The camera:
+/// - Moves forward with gentle speed variation
+/// - Slowly drifts (heading changes) using layered sine noise
+/// - Bobs up/down
+/// - Stays within a soft bounding radius, turning back toward the center
+/// - Looks toward the world center for a consistent focal point
+fn menu_camera_flight(
     time: Res<Time>,
-    mut orbit: ResMut<MenuCameraOrbit>,
+    mut flight: ResMut<MenuCameraFlight>,
     phase: Option<Res<GamePhase>>,
+    sampler: Option<Res<TerrainSampler>>,
     mut q_cam: Query<&mut Transform, With<OrbitCamera>>,
 ) {
     if !matches!(phase.map(|p| *p), Some(GamePhase::Menu)) {
         return;
     }
-    let Ok(mut cam_t) = q_cam.get_single_mut() else { return; };
-    let radius = 22.0;
-    let speed = 0.25; // rad/s
-    orbit.angle = (orbit.angle + speed * time.delta_seconds()) % (std::f32::consts::TAU);
-    let x = orbit.angle.cos() * radius;
-    let z = orbit.angle.sin() * radius;
-    let y = 10.0;
-    cam_t.translation = Vec3::new(x, y, z);
-    cam_t.look_at(Vec3::ZERO, Vec3::Y);
+    let Ok(mut cam_t) = q_cam.get_single_mut() else {
+        return;
+    };
+
+    let dt = time.delta_seconds();
+    let t = {
+        flight.t += dt;
+        flight.t
+    };
+
+    // Heading wander (layered low‑freq sines)
+    let wander = (t * 0.05).sin() * 0.35
+        + (t * 0.083).cos() * 0.18
+        + (t * 0.021).sin() * 0.12;
+    flight.heading += wander * dt;
+
+    // Forward velocity (gently varying)
+    let base_speed = 26.0;
+    let speed_variation = 6.0 * (t * 0.23).sin() + 3.0 * (t * 0.11).cos();
+    let speed = (base_speed + speed_variation).max(2.0);
+
+    // Advance position
+    let forward_flat = Vec3::new(flight.heading.cos(), 0.0, flight.heading.sin());
+    flight.pos += forward_flat * speed * dt;
+
+    // Vertical profile: base + bob + terrain follow
+    let bob = (t * 0.37).sin() * 3.0 + (t * 0.19).cos() * 1.2;
+    let mut desired_y = 18.0 + bob;
+    if let Some(s) = &sampler {
+        let ground = s.height(flight.pos.x, flight.pos.z);
+        let terrain_clear = ground + 12.0; // keep ~12 units above terrain + bob
+        if desired_y < terrain_clear {
+            desired_y = terrain_clear;
+        }
+    }
+    // Smooth Y toward desired to avoid abrupt jumps.
+    flight.pos.y = flight.pos.y.lerp(desired_y, (dt * 1.5).clamp(0.0, 1.0));
+
+    cam_t.translation = flight.pos;
+
+    // Look ahead along path with slight downward tilt.
+    let look_target = flight.pos + forward_flat * 60.0 + Vec3::new(0.0, -8.0, 0.0);
+    cam_t.look_at(look_target, Vec3::Y);
 }
 
 /// Apply gameplay camera follow with speed limits (position & target smoothing).
@@ -200,8 +262,12 @@ fn orbit_camera_apply(
         return;
     }
 
-    let Ok(ball_t) = q_ball.get_single() else { return; };
-    let Ok(mut cam_t) = q_cam.get_single_mut() else { return; };
+    let Ok(ball_t) = q_ball.get_single() else {
+        return;
+    };
+    let Ok(mut cam_t) = q_cam.get_single_mut() else {
+        return;
+    };
 
     let raw_target = ball_t.translation + Vec3::Y * cfg.target_height_offset;
 
