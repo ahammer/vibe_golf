@@ -237,8 +237,6 @@ fn spawn_runtime_ball(
     level: Option<Res<LevelDef>>,
     sampler: Option<Res<TerrainSampler>>,
     assets: Res<AssetServer>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut mats: ResMut<Assets<StandardMaterial>>,
     q_ball: Query<Entity, With<Ball>>,
 ) {
     if !matches!(phase.map(|p| *p), Some(GamePhase::Playing)) { return; }

@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use crate::plugins::contour_material::{ContourExtension, topo_palette};
 use crate::plugins::terrain_graph::{build_terrain_graph, NodeRef, GraphContext};
 use crate::plugins::ball::Ball;
-use rand::prelude::*;
 
 /// Configuration for procedural terrain height sampling & mesh generation.
 #[derive(Resource, Clone)]
@@ -255,119 +254,8 @@ fn update_terrain_chunks(
     let _dt = time.delta_seconds();
 }
 
-#[derive(Component)]
-pub struct VegetationInstance;
 
-fn populate_chunk_vegetation(
-    mut commands: Commands,
-    sampler: Res<TerrainSampler>,
-    cfg: Res<TerrainConfig>,
-    assets: Res<AssetServer>,
-    q_new: Query<(Entity, &TerrainChunk, &Transform), Added<TerrainChunk>>,
-) {
-    // Removed tree & meatball models here to avoid duplicate tiny trees and extra "balls".
-    // Tree placement handled by global vegetation system in vegetation.rs.
-    let models = [
-        "models/candy_1.glb#Scene0",
-        "models/candy_2.glb#Scene0",
-        "models/snowflake.glb#Scene0",
-    ];
-    for (chunk_entity, _chunk, t_chunk) in &q_new {
-        let base = t_chunk.translation;
-        // Parent vegetation to chunk so it despawns automatically.
-        commands.entity(chunk_entity).with_children(|c| {
-            // Rejection sampling: attempt more candidates to achieve target count biased to valleys & gentle slopes.
-            let mut placed = 0u32;
-            let mut attempts = 0u32;
-            let max_attempts = cfg.vegetation_per_chunk * 6;
-            while placed < cfg.vegetation_per_chunk && attempts < max_attempts {
-                attempts += 1;
-                let rx: f32 = random();
-                let rz: f32 = random();
-                // Compute local (chunk‑relative) and world positions separately.
-                let local_x = rx * cfg.chunk_size;
-                let local_z = rz * cfg.chunk_size;
-                let world_x = base.x + local_x;
-                let world_z = base.z + local_z;
-                let h = sampler.height(world_x, world_z);
-                let n = sampler.normal(world_x, world_z);
-                if n.y < 0.60 { // avoid steeper slopes
-                    continue;
-                }
-                let macro_v = sampler.macro_value(world_x, world_z);
-                // Compute valley & mountain factors
-                let m_start = cfg.mountain_start;
-                let m_end = cfg.mountain_end;
-                let v_start = cfg.valley_start;
-                let v_end = cfg.valley_end;
-                let smooth = |a: f32, b: f32, v: f32| {
-                    if (b - a).abs() < 1e-6 { return 0.0; }
-                    let mut t = ((v - a) / (b - a)).clamp(0.0, 1.0);
-                    t = t * t * (3.0 - 2.0 * t);
-                    t
-                };
-                let mountain_t = smooth(m_start, m_end, macro_v);
-                let valley_t = smooth(v_end, v_start, macro_v); // reversed
 
-                // Probability weight: prefer valleys & mid hills, sparse mountains
-                let weight = 0.15 + valley_t * 0.55 + (1.0 - mountain_t) * 0.25;
-                if random::<f32>() > weight {
-                    continue;
-                }
-
-                let model = models[random::<usize>() % models.len()];
-                let r = random::<f32>();
-                // Simplified, consistent decorative prop scale (avoid tiny tree artifacts).
-                let scale = 1.0 + r * 0.8; // 1.0 .. 1.8
-                c.spawn((
-                    SceneBundle {
-                        scene: assets.load(model),
-                        // Use chunk‑local translation so parenting does NOT double-apply chunk origin.
-                        transform: Transform::from_xyz(local_x, h, local_z)
-                            .with_scale(Vec3::splat(scale))
-                            .with_rotation(Quat::from_rotation_y(random::<f32>() * std::f32::consts::TAU)),
-                        ..default()
-                    },
-                    VegetationInstance,
-                ));
-                placed += 1;
-            }
-        });
-    }
-}
-
-fn align_vegetation(
-    sampler: Res<TerrainSampler>,
-    q_globals: Query<&GlobalTransform>,
-    mut q_added: Query<(&Parent, &mut Transform), (With<VegetationInstance>, Added<VegetationInstance>)>,
-) {
-    for (parent, mut t) in &mut q_added {
-        // Convert chunk-local (child) position to world for sampling.
-        let parent_gt = q_globals.get(parent.get()).ok();
-        let parent_pos = parent_gt.map(|g| g.translation()).unwrap_or(Vec3::ZERO);
-        let world_x = parent_pos.x + t.translation.x;
-        let world_z = parent_pos.z + t.translation.z;
-
-        let h = sampler.height(world_x, world_z);
-        t.translation.y = h;
-        let n = sampler.normal(world_x, world_z);
-
-        // Limit tilt for stylization (max ~17 degrees)
-        let max_tilt = 0.30_f32;
-        let up = Vec3::Y;
-        let angle = up.angle_between(n);
-        if angle > 1e-3 {
-            let clamped = angle.min(max_tilt);
-            let axis = up.cross(n).normalize_or_zero();
-            if axis.length_squared() > 0.0 {
-                let q = Quat::from_axis_angle(axis, clamped);
-                // Preserve existing yaw (world up rotation)
-                let yaw = t.rotation.to_euler(EulerRot::YXZ).0;
-                t.rotation = Quat::from_rotation_y(yaw) * q;
-            }
-        }
-    }
-}
 
 /// Spawn a single chunk at grid coordinate.
 fn spawn_chunk(

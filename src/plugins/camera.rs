@@ -187,7 +187,6 @@ fn menu_camera_orbit(
 
 /// Apply gameplay camera follow with speed limits (position & target smoothing).
 fn orbit_camera_apply(
-    time: Res<Time>,
     state: Res<OrbitCameraState>,
     cfg: Res<OrbitCameraConfig>,
     sampler: Option<Res<TerrainSampler>>,

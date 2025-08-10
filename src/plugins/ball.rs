@@ -1,7 +1,6 @@
 // Ball components & simple custom kinematic physics (terrain + world bounds).
 use bevy::prelude::*;
 use crate::plugins::terrain::TerrainSampler;
-use crate::plugins::level::LevelDef;
 use crate::plugins::particles::BallGroundImpactEvent;
 
 #[derive(Component)]
@@ -25,7 +24,6 @@ impl Plugin for BallPlugin {
 fn ball_physics(
     mut q: Query<(&mut Transform, &mut BallKinematic), With<Ball>>,
     sampler: Res<TerrainSampler>,
-    level: Option<Res<LevelDef>>,
     mut ev_impact: EventWriter<BallGroundImpactEvent>,
 ) {
     let Ok((mut t, mut kin)) = q.get_single_mut() else { return; };

@@ -96,6 +96,15 @@ pub struct VegetationConfig {
     pub min_spacing_inner: f32,
     pub min_spacing_slope: f32,
     pub min_spacing_rim: f32,
+    // New clustering / variation controls
+    pub patch_noise_freq: f64,   // low-frequency patchiness noise
+    pub patch_contrast: f32,     // contrast applied to patch noise (higher = more binary clusters)
+    pub inner_cap: usize,        // max trees allowed in inner play radius
+    // Hero / variation controls
+    pub hero_chance: f32,        // probability a tree becomes a hero (bigger)
+    pub hero_scale_min_mul: f32, // min multiplier for hero scale
+    pub hero_scale_max_mul: f32, // max multiplier for hero scale
+    pub tilt_max_deg: f32,       // random tilt around X/Z to avoid uniform uprights
 }
 impl Default for VegetationConfig {
     fn default() -> Self {
@@ -104,15 +113,22 @@ impl Default for VegetationConfig {
             noise_freq: 0.035,
             base_density: 1.0,
             threshold: 0.50,
-            max_instances: 2600,
+            max_instances: 8000,
             min_slope_normal_y: 0.70,
             scale_min: 5.0,
             scale_max: 10.0,
             samples_per_frame: 700,
             batch_spawn_flush: 256,
-            min_spacing_inner: 22.0,
+            min_spacing_inner: 16.0,
             min_spacing_slope: 12.0,
             min_spacing_rim: 8.0,
+            patch_noise_freq: 0.010,
+            patch_contrast: 1.7,
+            inner_cap: 140,
+            hero_chance: 0.04,
+            hero_scale_min_mul: 1.6,
+            hero_scale_max_mul: 2.4,
+            tilt_max_deg: 7.0,
         }
     }
 }
@@ -289,17 +305,7 @@ struct VegetationSpawnState {
     spacing_grid: SpacingGrid,
 }
 
-// Data structure passed through functional stages
-#[derive(Clone, Debug)]
-struct Candidate {
-    pos: Vec2,
-    height: f32,
-    normal: Vec3,
-    noise_norm: f32,
-    radial_mask: f32,
-    slope_mask: f32,
-    density: f32,
-}
+// Candidate struct removed (fields were unused beyond transform construction)
 
 // ---------------- Utility / Functional Stages ----------------
 
@@ -368,17 +374,31 @@ fn decide_spawn(density: f32, threshold: f32) -> bool {
 }
 
 #[inline(always)]
-fn build_transform(c: &Candidate, rng: &mut impl Rng, cfg: &VegetationConfig) -> Transform {
-    let rot = Quat::from_rotation_y(rng.gen_range(0.0..std::f32::consts::TAU));
-    let scale_base = rng.gen_range(cfg.scale_min..cfg.scale_max);
+fn build_transform(pos: Vec2, height: f32, rng: &mut impl Rng, cfg: &VegetationConfig) -> Transform {
+    // Base yaw
+    let yaw = Quat::from_rotation_y(rng.gen_range(0.0..std::f32::consts::TAU));
+
+    // Random gentle tilt
+    let tilt_max = cfg.tilt_max_deg.to_radians();
+    let tilt_x = rng.gen_range(-tilt_max..tilt_max);
+    let tilt_z = rng.gen_range(-tilt_max..tilt_max);
+    let tilt = Quat::from_rotation_x(tilt_x) * Quat::from_rotation_z(tilt_z);
+
+    // Scale (with occasional hero enlargement)
+    let mut scale_base = rng.gen_range(cfg.scale_min..cfg.scale_max);
+    if rng.gen_bool(cfg.hero_chance as f64) {
+        scale_base *= rng.gen_range(cfg.hero_scale_min_mul..cfg.hero_scale_max_mul);
+    }
+
     let scale = Vec3::new(
         scale_base * rng.gen_range(0.95..1.05),
         scale_base * rng.gen_range(0.95..1.10),
         scale_base * rng.gen_range(0.95..1.05),
     );
+
     Transform {
-        translation: Vec3::new(c.pos.x, c.height, c.pos.y),
-        rotation: rot,
+        translation: Vec3::new(pos.x, height, pos.y),
+        rotation: yaw * tilt,
         scale,
     }
 }
@@ -399,7 +419,7 @@ fn region_weight(r_len: f32, play_r: f32, rim_start: f32, rim_peak: f32) -> (f32
         return (0.0, false);
     }
     if r_len < play_r {
-        return (0.10, true); // sparse inner
+        return (0.25, true); // less sparse inner
     }
     if r_len < rim_start {
         let t = ((r_len - play_r) / (rim_start - play_r)).clamp(0.0, 1.0);
@@ -420,7 +440,8 @@ fn prepare_vegetation(
     sampler: Res<TerrainSampler>,
     cfg: Res<VegetationConfig>,
 ) {
-    let half = sampler.cfg.chunk_size * 0.5;
+    // Cover full visible terrain radius for tree spawning instead of just half a chunk around origin.
+    let half = sampler.cfg.chunk_size * sampler.cfg.view_radius_chunks as f32;
     let points = generate_grid_points(half, cfg.cell_size);
     let perlin = Perlin::new(sampler.cfg.seed.wrapping_add(917_331));
     let tree1 = assets.load("models/tree_1.glb#Scene0");
@@ -552,7 +573,7 @@ fn progressive_spawn_trees(
         let (weight, region_inner) = region_weight(r_len, play_r, rim_start, rim_peak);
 
         // Enforce sparse inner quota cap
-        if region_inner && state.inner_spawned >= 50 {
+        if region_inner && state.inner_spawned >= cfg.inner_cap {
             continue;
         }
 
@@ -561,10 +582,17 @@ fn progressive_spawn_trees(
             continue;
         }
 
-        // Noise layer
+        // Noise layers
         let n_val = noise_density(&assets.perlin, p, cfg.noise_freq);
-        // Quick preliminary test
-        if cfg.base_density * n_val * r_mask <= cfg.threshold {
+
+        // Low-frequency patch noise for clustering
+        let patch_raw = assets.perlin.get([p.x as f64 * cfg.patch_noise_freq, p.y as f64 * cfg.patch_noise_freq]);
+        let patch_norm = (patch_raw as f32 * 0.5 + 0.5).clamp(0.0, 1.0);
+        let centered = (patch_norm - 0.5) * cfg.patch_contrast;
+        let patch_mod = (centered + 0.5).clamp(0.0, 1.0).powf(1.2); // emphasize extremes a bit
+
+        // Quick preliminary test (approx density before slope & spacing)
+        if cfg.base_density * n_val * patch_mod * r_mask <= cfg.threshold {
             state.early_noise_rejects += 1;
             continue;
         }
@@ -578,37 +606,28 @@ fn progressive_spawn_trees(
         }
 
         // Final density
-        let density = combine_density(cfg.base_density, n_val, r_mask, s_mask);
+        let density = combine_density(cfg.base_density, n_val, r_mask, s_mask) * patch_mod;
         if !decide_spawn(density, cfg.threshold) {
             continue;
         }
 
         // Region-specific minimum spacing
-        let spacing = if r_len < play_r {
+        let base_spacing = if r_len < play_r {
             cfg.min_spacing_inner
         } else if r_len < rim_start {
             cfg.min_spacing_slope
         } else {
             cfg.min_spacing_rim
         };
+        // Slightly reduce spacing inside dense patches so clusters feel fuller
+        let spacing = base_spacing * (0.75 + 0.25 * (1.0 - patch_mod));
 
         // Spatial hash rejection
         if state.spacing_grid.too_close(p, spacing) {
             continue;
         }
 
-        let candidate = Candidate {
-            pos: p,
-            height: h,
-            normal: n,
-            noise_norm: n_val,
-            radial_mask: r_mask,
-            slope_mask: s_mask,
-            density,
-        };
-
-        let transform = build_transform(&candidate, &mut rng, &cfg);
-
+        let transform = build_transform(p, h, &mut rng, &cfg);
         // Still using full scenes (template local offsets lost for direct mesh instancing)
         let handle = random_tree_handle(&mut rng, &assets.tree1, &assets.tree2);
         state.batch.push((
@@ -623,7 +642,7 @@ fn progressive_spawn_trees(
         if region_inner {
             state.inner_spawned += 1;
         }
-        state.spacing_grid.insert(candidate.pos);
+        state.spacing_grid.insert(p);
         state.spawned += 1;
 
         if state.batch.len() >= cfg.batch_spawn_flush {

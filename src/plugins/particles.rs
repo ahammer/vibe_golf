@@ -45,7 +45,6 @@ enum ParticleKind {
 struct Particle {
     lifetime: f32,
     age: f32,
-    fade: bool,
     gravity: f32,
     vel: Vec3,
     angular_vel: Vec3,
@@ -293,7 +292,6 @@ fn spawn_dust_on_impact(
                     Particle {
                         lifetime: 10.0,
                         age: 0.0,
-                        fade: false,
                         gravity: -9.8,
                         vel: dir * speed,
                         angular_vel: angular,
@@ -312,7 +310,6 @@ fn spawn_dust_on_impact(
                     Particle {
                         lifetime: 10.0,
                         age: 0.0,
-                        fade: false,
                         gravity: -9.8,
                         vel: dir * speed,
                         angular_vel: angular,
@@ -366,7 +363,6 @@ fn spawn_shot_blast(
             let particle = Particle {
                 lifetime: rng.gen_range(0.45..0.85),
                 age: 0.0,
-                fade: false,
                 gravity: -9.5,
                 vel: dir * speed,
                 angular_vel: Vec3::new(
@@ -436,7 +432,6 @@ fn spawn_explosion_on_hit(
             let particle = Particle {
                 lifetime: rng.gen_range(0.5..1.0),
                 age: 0.0,
-                fade: false,
                 gravity: -9.0,
                 vel: dir * speed,
                 angular_vel: Vec3::new(
@@ -507,7 +502,6 @@ fn spawn_confetti_on_game_over(
             let particle = Particle {
                 lifetime: rng.gen_range(3.5..6.0),
                 age: 0.0,
-                fade: false,
                 gravity: -6.0,
                 vel,
                 angular_vel: Vec3::new(
