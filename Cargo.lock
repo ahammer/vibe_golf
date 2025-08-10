@@ -4022,6 +4022,8 @@ dependencies = [
  "bevy_rapier3d",
  "noise",
  "rand 0.8.5",
+ "ron",
+ "serde",
 ]
 
 [[package]]
