@@ -29,7 +29,7 @@ use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 use noise::{NoiseFn, Perlin};
 use rand::{thread_rng, Rng};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::plugins::ball::Ball;
 use crate::plugins::terrain::TerrainSampler;
@@ -58,7 +58,8 @@ impl Plugin for VegetationPlugin {
             .add_systems(
                 Update,
                 (
-                    extract_tree_mesh_variants.before(progressive_spawn_trees),
+                    extract_tree_mesh_variants.before(vegetation_expand_area),
+                    vegetation_expand_area.before(progressive_spawn_trees),
                     progressive_spawn_trees,
                     cull_trees.after(progressive_spawn_trees),
                     tree_lod_update.after(cull_trees),
@@ -303,6 +304,8 @@ struct VegetationSpawnState {
     finished: bool,
     batch: Vec<(SceneBundle, (Tree, TreeCulled, TreeLod))>,
     spacing_grid: SpacingGrid,
+    half_extent: f32,
+    seen_cells: HashSet<(i32, i32)>,
 }
 
 // Candidate struct removed (fields were unused beyond transform construction)
@@ -455,6 +458,15 @@ fn prepare_vegetation(
         tree2: tree2.clone(),
         perlin,
     });
+    // Build initial seen cell set
+    let mut seen_cells = HashSet::new();
+    let step_count = (half / cfg.cell_size).ceil() as i32;
+    for j in -step_count..=step_count {
+        for i in -step_count..=step_count {
+            seen_cells.insert((i, j));
+        }
+    }
+
     commands.insert_resource(VegetationSpawnState {
         points,
         cursor: 0,
@@ -466,6 +478,8 @@ fn prepare_vegetation(
         finished: false,
         batch: Vec::with_capacity(cfg.batch_spawn_flush),
         spacing_grid: SpacingGrid::new(spacing_cell),
+        half_extent: half,
+        seen_cells,
     });
 
     // Hidden template scenes to extract mesh/material variants later.
@@ -533,6 +547,57 @@ fn extract_tree_mesh_variants(
             variants.variants.len()
         );
     }
+}
+
+fn vegetation_expand_area(
+    sampler: Res<TerrainSampler>,
+    cfg: Res<VegetationConfig>,
+    q_ball: Query<&Transform, With<Ball>>,
+    mut state: ResMut<VegetationSpawnState>,
+) {
+    let Ok(ball_t) = q_ball.get_single() else { return; };
+    let pos = Vec2::new(ball_t.translation.x, ball_t.translation.z);
+    let dist = pos.length();
+    // Trigger expansion when player nears 60% of current extent
+    if dist < state.half_extent * 0.6 {
+        return;
+    }
+    // Target new half extent (add half a chunk margin)
+    let target = dist + sampler.cfg.chunk_size * 0.5;
+    if target <= state.half_extent + cfg.cell_size {
+        return;
+    }
+    let old_half = state.half_extent;
+    state.half_extent = target;
+
+    let new_steps = (state.half_extent / cfg.cell_size).ceil() as i32;
+    let old_steps = (old_half / cfg.cell_size).ceil() as i32;
+
+    for j in -new_steps..=new_steps {
+        for i in -new_steps..=new_steps {
+            // Skip cells already inside old square
+            if i.abs() <= old_steps && j.abs() <= old_steps {
+                continue;
+            }
+            let key = (i, j);
+            if state.seen_cells.contains(&key) {
+                continue;
+            }
+            state.seen_cells.insert(key);
+            state.points.push(Vec2::new(i as f32 * cfg.cell_size, j as f32 * cfg.cell_size));
+        }
+    }
+
+    // Allow spawning loop to resume if it was previously marked finished
+    if state.finished && state.cursor < state.points.len() && state.spawned < cfg.max_instances {
+        state.finished = false;
+    }
+
+    info!(
+        "Vegetation area expanded: half_extent {:.1} (points now {})",
+        state.half_extent,
+        state.points.len()
+    );
 }
 
 fn progressive_spawn_trees(
