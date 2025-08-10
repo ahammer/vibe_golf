@@ -2,28 +2,51 @@
 
 Scope: Reduce CPU frame time, GPU frame time, draw calls, and memory bandwidth while preserving perceived visual quality.
 
-## 0. Baseline & Instrumentation (Do First)
+## 0. Baseline & Instrumentation (Status: Initial Pass Implemented)
 
-Instrument before changing anything.
+Implemented:
+- Runtime limiter: `-runtime <seconds>` (or `--runtime=<seconds>`) sets `AutoConfig.run_duration_seconds`; app auto-exits via `exit_after_runtime` system (logs `EXIT runtime reached seconds=X`).
+- Headless-ish capture control: `--no-screenshot` disables first/last frame screenshot overhead.
+- Frame diagnostics: `FrameTimeDiagnosticsPlugin` + `LogDiagnosticsPlugin` already emit per‑second FPS, frame_time.
+- Vegetation draw call & build logs present (used for baseline counts).
+- Deterministic fixed-tick (60 Hz) simulation timing.
 
-Metrics to record (build a simple spreadsheet):
-- FPS (avg / 1% low) in fixed camera flyover + active play
-- CPU frame time (ms) / GPU frame time (ms) (from Bevy diagnostics)
-- Entity count (total, vegetation, terrain chunks, particles)
-- Approx vegetation draw call batches (already logged)
-- Number of terrain chunk meshes loaded
-- Memory (process RSS)
-- Worst frame stutter spikes (max frame time)
+Pending / Nice-to-have instrumentation:
+- (Optional) `RenderDiagnosticsPlugin` for per-pass stats (decide after first optimization wave; adds some overhead).
+- Feature flag `perf_profile` to gate extra verbose logs (draw call debug frequency throttling).
+- Automated metric collector script (loop `cargo run --release -- -runtime N --no-screenshot`, parse stdout into CSV).
+- Memory (RSS) sampling (external: `Get-Process vibe_golf | Select-Object WorkingSet64` on Windows, integrate into script).
+- 1% low calculation: script to parse frame_time logs -> compute distribution.
 
-Add (if not already):
-- `RenderDiagnosticsPlugin` (enables per-pass stats) – optional if acceptable
-- Simple profiling feature flag `--features perf_profile` to conditionally add extra diagnostics & log intervals.
+Baseline Scenario Script (to automate next):
+1. Launch with `-runtime 40 --no-screenshot`.
+2. In input automation (future): stay idle until vegetation fully builds (~ first 20s), then trigger outward camera/character move (placeholder manual step currently).
+3. (Interim) For first pass, rely on natural build-out; capture logs until exit.
 
-Repeat a fixed deterministic scenario:
-1. Start at main menu for 5s.
-2. Play, do not move camera/player for 10s (baseline idle).
-3. Move outward to trigger vegetation + terrain expansion for 30s.
-4. Fire 5 shots (physics + particle stress).
+Metrics to record (spreadsheet / CSV):
+- FPS avg, median, 1% low (derived from frame_time logs)
+- CPU frame time (from diagnostics; currently same source)
+- Estimated GPU frame time (need RenderDiagnostics or external capture later)
+- Entity counts snapshot (add future system to log once at t=runtime-0.5s)
+- Vegetation visible trees & approx unique batches (already logged periodically)
+- Terrain chunk count (add logging hook)
+- Process RSS (external sample near end)
+- Worst frame_time spike (max logged)
+
+Immediate next instrumentation tasks (before first optimization changes):
+- Add one-time end-of-run summary system printing: total_chunks, visible_trees, last fps avg (reduces parsing complexity).
+- Add optional `--log-final-stats` flag or reuse existing runtime path (low complexity).
+- (Optional) Stub script (PowerShell / Rust) to loop runs and append CSV.
+
+After these, lock baseline snapshot and proceed to OPT-01..03.
+
+Repeat deterministic scenario (future when input automation added):
+1. Main menu 5s.
+2. Idle 10s.
+3. Outward expansion 30s.
+4. Shot sequence (5 shots) final seconds.
+
+Current limitation: No automated input yet; treat vegetation build + idle as provisional baseline. Update once input scripting exists.
 
 ## 1. Current Observations (from code review)
 
