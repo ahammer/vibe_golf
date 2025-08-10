@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::app::AppExit;
 use bevy::time::Fixed;
 use bevy_rapier3d::prelude::{Velocity, RigidBody};
 use crate::plugins::game_state::Score;
@@ -34,16 +35,21 @@ pub struct AutoRuntime { pub next_swing_tick: u64 }
 #[derive(Resource, Default)]
 pub struct LogState { pub last_logged_second: u64 }
 
+#[derive(Resource, Default)]
+pub struct ExitState { pub triggered: bool }
+
 pub struct CoreSimPlugin;
 impl Plugin for CoreSimPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(SimState::default())
-            .insert_resource(AutoConfig::default())
+            .init_resource::<AutoConfig>() // respect pre-inserted AutoConfig (e.g. from -runtime flag)
             .insert_resource(AutoRuntime::default())
             .insert_resource(LogState::default())
+            .insert_resource(ExitState::default())
             .insert_resource(Time::<Fixed>::from_hz(60.0))
             .add_systems(FixedUpdate, tick_state)
-            .add_systems(Update, apply_custom_gravity);
+            .add_systems(Update, apply_custom_gravity)
+            .add_systems(Update, exit_after_runtime);
     }
 }
 
@@ -64,6 +70,20 @@ fn apply_custom_gravity(mut q: Query<(&RigidBody, &mut Velocity)>) {
         if matches!(*rb, RigidBody::Dynamic) {
             vel.linvel.y += g * dt;
         }
+    }
+}
+
+fn exit_after_runtime(
+    sim: Res<SimState>,
+    auto: Res<AutoConfig>,
+    mut exit_state: ResMut<ExitState>,
+    mut ev_exit: EventWriter<AppExit>,
+) {
+    if exit_state.triggered { return; }
+    if sim.elapsed_seconds >= auto.run_duration_seconds {
+        info!("EXIT runtime reached seconds={}", sim.elapsed_seconds);
+        exit_state.triggered = true;
+        ev_exit.send(AppExit::Success);
     }
 }
 
