@@ -22,6 +22,7 @@ pub mod plugins {
     pub mod game_audio;
     pub mod contour_material;
     pub mod vegetation;
+    pub mod main_menu;
 }
 use plugins::core_sim::CoreSimPlugin;
 use plugins::game_state::GameStatePlugin;
@@ -36,6 +37,7 @@ use plugins::vegetation::VegetationPlugin;
 use plugins::particles::ParticlePlugin;
 use plugins::game_audio::GameAudioPlugin;
 use plugins::contour_material::ContourMaterialPlugin;
+use plugins::main_menu::MainMenuPlugin;
 
 mod screenshot;
 use screenshot::{ScreenshotPlugin, ScreenshotConfig};
@@ -62,6 +64,7 @@ fn main() {
         .add_plugins(ParticlePlugin)        // particle & FX systems (register events before gameplay systems use them)
         .add_plugins(GameAudioPlugin)       // game audio (music + sfx)
         .add_plugins(GameStatePlugin)       // shot state, scoring
+        .add_plugins(MainMenuPlugin)        // main menu (Play/Quit/High Score)
         .add_plugins(LevelPlugin)           // level loading & world entities (camera, sky, walls, spawn ball/target)
         .add_plugins(BallPlugin)            // ball physics
         .add_plugins(TargetPlugin)          // target motion + hit detection
