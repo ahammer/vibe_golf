@@ -34,7 +34,7 @@ pub struct TerrainConfig {
     pub valley_end: f32,
     // Chunked terrain params
     pub chunk_size: f32,
-    pub resolution: u32,
+    pub resolution: u32,            // near (LOD0) resolution
     pub view_radius_chunks: i32,
     pub max_spawn_per_frame: usize,
     // Radial shaping (local crater) still applied (can later gate by distance)
@@ -45,6 +45,11 @@ pub struct TerrainConfig {
     pub vegetation_per_chunk: u32,
     pub mountain_height: f32,
     pub valley_depth: f32,
+    // LOD (OPT-06)
+    pub lod_mid_distance: f32,      // world distance threshold for mid LOD
+    pub lod_far_distance: f32,      // world distance threshold for far LOD
+    pub lod_mid_resolution: u32,    // mesh resolution for mid ring
+    pub lod_far_resolution: u32,    // mesh resolution for far ring
 }
 
 impl Default for TerrainConfig {
@@ -77,6 +82,11 @@ impl Default for TerrainConfig {
             vegetation_per_chunk: 40,
             mountain_height: 10.0,
             valley_depth: 8.0,
+            // OPT-06 LOD defaults: chunk_size 160 => choose distances several chunk spans out
+            lod_mid_distance: 160.0 * 3.2, // ~3.2 chunks
+            lod_far_distance: 160.0 * 5.0, // 5 chunks
+            lod_mid_resolution: 48,        // half
+            lod_far_resolution: 24,        // quarter
         }
     }
 }
@@ -158,6 +168,7 @@ pub fn sample_height_normal(x: f32, z: f32, sampler: &TerrainSampler) -> (f32, V
 #[derive(Component)]
 pub struct TerrainChunk {
     pub coord: IVec2,
+    pub res: u32, // OPT-06: store resolution used (for LOD stats)
 }
 
 #[derive(Resource, Default)]
@@ -168,6 +179,14 @@ pub struct LoadedChunks {
 #[derive(Resource, Default)]
 pub struct InProgressChunks {
     pub set: HashSet<IVec2>,
+}
+
+#[derive(Resource, Default)]
+struct TerrainGlobalMaterial {
+    handle: Option<Handle<ExtendedMaterial<StandardMaterial, ContourExtension>>>,
+    min_h: f32,
+    max_h: f32,
+    created_logged: bool,
 }
 
 struct ChunkBuildResult {
@@ -193,6 +212,8 @@ impl Plugin for TerrainPlugin {
             .add_systems(PreStartup, init_sampler)
             .insert_resource(LoadedChunks::default())
             .insert_resource(InProgressChunks::default())
+            // OPT-04: Global shared terrain material (batches all chunks into few draw calls)
+            .insert_resource(TerrainGlobalMaterial::default())
             .add_systems(
                 Update,
                 (
@@ -264,7 +285,21 @@ fn update_terrain_chunks(
         if spawned_this_frame >= cfg.max_spawn_per_frame {
             break;
         }
-        spawn_chunk_task(&mut commands, *coord, sampler.as_ref().clone());
+        // OPT-06: Choose LOD resolution based on distance from player
+        let chunk_world_center = Vec3::new(
+            coord.x as f32 * cfg.chunk_size + cfg.chunk_size * 0.5,
+            0.0,
+            coord.y as f32 * cfg.chunk_size + cfg.chunk_size * 0.5,
+        );
+        let dist = chunk_world_center.xy().distance(center_pos.xy());
+        let chosen_res = if dist > cfg.lod_far_distance {
+            cfg.lod_far_resolution
+        } else if dist > cfg.lod_mid_distance {
+            cfg.lod_mid_resolution
+        } else {
+            cfg.resolution
+        };
+        spawn_chunk_task(&mut commands, *coord, sampler.as_ref().clone(), chosen_res);
         in_progress.set.insert(*coord);
         spawned_this_frame += 1;
     }
@@ -281,11 +316,11 @@ fn update_terrain_chunks(
     }
 }
 
-fn spawn_chunk_task(commands: &mut Commands, coord: IVec2, sampler: TerrainSampler) {
+fn spawn_chunk_task(commands: &mut Commands, coord: IVec2, sampler: TerrainSampler, override_res: u32) {
     let task_pool = AsyncComputeTaskPool::get();
     let task = task_pool.spawn(async move {
         let cfg = &sampler.cfg;
-        let res = cfg.resolution;
+        let res = override_res;
         let size = cfg.chunk_size;
         let step = size / res as f32;
 
@@ -374,30 +409,61 @@ fn finalize_chunk_tasks(
     mut in_progress: ResMut<InProgressChunks>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut contour_mats: ResMut<Assets<ExtendedMaterial<StandardMaterial, ContourExtension>>>,
+    mut global_mat: ResMut<TerrainGlobalMaterial>,
     mut q_tasks: Query<(Entity, &mut ChunkBuildTask)>,
 ) {
     for (e, mut build) in q_tasks.iter_mut() {
         if let Some(result) = block_on(poll_once(&mut build.task)) {
             let coord = result.coord;
-            let (palette_arr, palette_len) = topo_palette();
-            let mut ext = ContourExtension::default();
-            ext.data.min_height = result.min_h;
-            ext.data.max_height = result.max_h;
-            ext.data.interval = 1.6;
-            ext.data.thickness = 0.70;
-            ext.data.scroll_speed = 0.40;
-            ext.data.darken = 0.88;
-            ext.data.palette_len = palette_len;
-            for i in 0..palette_len as usize {
-                ext.data.colors[i] = palette_arr[i];
+
+            // OPT-04: Shared terrain material batching.
+            // Update global min/max; create material once; reuse for all chunks so they share a single material (reduces draw calls).
+            if global_mat.min_h == 0.0 && global_mat.max_h == 0.0 && global_mat.handle.is_none() {
+                // sentinel not relied upon; real init below
             }
-            let base = StandardMaterial {
-                base_color: Color::WHITE,
-                perceptual_roughness: 0.9,
-                metallic: 0.0,
-                ..default()
-            };
-            let material = contour_mats.add(ExtendedMaterial { base, extension: ext });
+            if global_mat.min_h == 0.0 && global_mat.handle.is_none() {
+                // initial assign large extremes
+                global_mat.min_h = f32::MAX;
+                global_mat.max_h = f32::MIN;
+            }
+            global_mat.min_h = global_mat.min_h.min(result.min_h);
+            global_mat.max_h = global_mat.max_h.max(result.max_h);
+
+            if global_mat.handle.is_none() {
+                let (palette_arr, palette_len) = topo_palette();
+                let mut ext = ContourExtension::default();
+                // temporary; will be overwritten below with aggregated range
+                ext.data.min_height = result.min_h;
+                ext.data.max_height = result.max_h;
+                ext.data.interval = 1.6;
+                ext.data.thickness = 0.70;
+                ext.data.scroll_speed = 0.40;
+                ext.data.darken = 0.88;
+                ext.data.palette_len = palette_len;
+                for i in 0..palette_len as usize {
+                    ext.data.colors[i] = palette_arr[i];
+                }
+                let base = StandardMaterial {
+                    base_color: Color::WHITE,
+                    perceptual_roughness: 0.9,
+                    metallic: 0.0,
+                    ..default()
+                };
+                let handle = contour_mats.add(ExtendedMaterial { base, extension: ext });
+                global_mat.handle = Some(handle.clone());
+                if !global_mat.created_logged {
+                    info!("Terrain global material created (OPT-04 batching active)");
+                    global_mat.created_logged = true;
+                }
+            }
+            if let Some(handle) = &global_mat.handle {
+                if let Some(mat) = contour_mats.get_mut(handle) {
+                    mat.extension.data.min_height = global_mat.min_h;
+                    mat.extension.data.max_height = global_mat.max_h;
+                }
+            }
+
+            let material = global_mat.handle.as_ref().unwrap().clone();
             let mesh_handle = meshes.add(result.mesh);
 
             let nrows = (result.res + 1) as usize;
@@ -428,7 +494,7 @@ fn finalize_chunk_tasks(
                         coefficient: 1.0,
                         combine_rule: CoefficientCombineRule::Average,
                     },
-                    TerrainChunk { coord },
+                    TerrainChunk { coord, res: result.res },
                 ));
 
             loaded.map.insert(coord, e);
