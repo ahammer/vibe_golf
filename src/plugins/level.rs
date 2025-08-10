@@ -143,6 +143,11 @@ fn spawn_level(
     commands.spawn((
         Camera3dBundle {
             transform: cam_start,
+            projection: PerspectiveProjection {
+                near: 0.05,
+                far: 25000.0,
+                ..Default::default()
+            }.into(),
             ..default()
         },
         OrbitCamera,
