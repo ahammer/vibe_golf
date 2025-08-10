@@ -197,6 +197,7 @@ struct ChunkBuildResult {
     max_h: f32,
     res: u32,
     step: f32,
+    create_collider: bool, // OPT-11: skip collider for far LOD chunks
 }
 
 #[derive(Component)]
@@ -299,7 +300,9 @@ fn update_terrain_chunks(
         } else {
             cfg.resolution
         };
-        spawn_chunk_task(&mut commands, *coord, sampler.as_ref().clone(), chosen_res);
+        // OPT-11: Only create physics collider for near & mid LOD; skip for far (reduces Rapier cost)
+        let create_collider = chosen_res != cfg.lod_far_resolution;
+        spawn_chunk_task(&mut commands, *coord, sampler.as_ref().clone(), chosen_res, create_collider);
         in_progress.set.insert(*coord);
         spawned_this_frame += 1;
     }
@@ -316,7 +319,7 @@ fn update_terrain_chunks(
     }
 }
 
-fn spawn_chunk_task(commands: &mut Commands, coord: IVec2, sampler: TerrainSampler, override_res: u32) {
+fn spawn_chunk_task(commands: &mut Commands, coord: IVec2, sampler: TerrainSampler, override_res: u32, create_collider: bool) {
     let task_pool = AsyncComputeTaskPool::get();
     let task = task_pool.spawn(async move {
         let cfg = &sampler.cfg;
@@ -398,6 +401,7 @@ fn spawn_chunk_task(commands: &mut Commands, coord: IVec2, sampler: TerrainSampl
             max_h,
             res,
             step,
+            create_collider,
         }
     });
     commands.spawn(ChunkBuildTask { coord, task });
@@ -468,34 +472,38 @@ fn finalize_chunk_tasks(
 
             let nrows = (result.res + 1) as usize;
             let ncols = (result.res + 1) as usize;
-            let collider = Collider::heightfield(
-                result.heights,
-                nrows,
-                ncols,
-                Vec3::new(result.step, 1.0, result.step),
-            );
 
             let origin_x = coord.x as f32 * result.res as f32 * result.step;
             let origin_z = coord.y as f32 * result.res as f32 * result.step;
 
-            commands
-                .entity(e)
-                .remove::<ChunkBuildTask>()
-                .insert((
-                    MaterialMeshBundle {
-                        mesh: mesh_handle,
-                        material,
-                        transform: Transform::from_translation(Vec3::new(origin_x, 0.0, origin_z)),
-                        ..default()
-                    },
+            let mut ec = commands.entity(e);
+            ec.remove::<ChunkBuildTask>();
+            ec.insert((
+                MaterialMeshBundle {
+                    mesh: mesh_handle,
+                    material,
+                    transform: Transform::from_translation(Vec3::new(origin_x, 0.0, origin_z)),
+                    ..default()
+                },
+                TerrainChunk { coord, res: result.res },
+            ));
+
+            if result.create_collider {
+                let collider = Collider::heightfield(
+                    result.heights,
+                    nrows,
+                    ncols,
+                    Vec3::new(result.step, 1.0, result.step),
+                );
+                ec.insert((
                     RigidBody::Fixed,
                     collider,
                     Friction {
                         coefficient: 1.0,
                         combine_rule: CoefficientCombineRule::Average,
                     },
-                    TerrainChunk { coord, res: result.res },
                 ));
+            }
 
             loaded.map.insert(coord, e);
             in_progress.set.remove(&coord);
