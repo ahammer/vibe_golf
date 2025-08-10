@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy::math::primitives::Cuboid;
+use bevy::math::primitives::{Cuboid, Sphere};
 use crate::plugins::terrain::TerrainSampler;
 use rand::prelude::*;
 use crate::plugins::camera::OrbitCamera;
@@ -47,6 +47,16 @@ pub struct PowerGauge;
 #[derive(Component)]
 pub struct ShotIndicator;
 
+// Individual trajectory dot (index along predicted path)
+#[derive(Component)]
+pub struct ShotIndicatorDot {
+    pub index: usize,
+}
+
+// Trajectory visualization parameters
+const TRAJ_DOT_COUNT: usize = 20;
+const TRAJ_DOT_DT: f32 = 0.2;
+
 #[derive(Component)]
 pub struct PowerBar;        // UI container for power bar
 #[derive(Component)]
@@ -74,10 +84,10 @@ impl Default for ShotState {
 #[derive(Resource, Debug)]
 pub struct ShotConfig {
     pub osc_speed: f32,    // units per second (triangle wave edge speed)
-    pub base_impulse: f32, // velocity applied at power=1
+    pub base_impulse: f32, // velocity applied at state.power=1 before scaling (we now map to 25%..200%)
     pub up_angle_deg: f32, // fixed elevation angle
-    pub indicator_base_len: f32,
-    pub indicator_var_len: f32,
+    pub indicator_base_len: f32, // (unused now)
+    pub indicator_var_len: f32,  // (unused now)
 }
 
 impl Default for ShotConfig {
@@ -268,22 +278,25 @@ fn setup_scene(
             BallKinematic { collider_radius: ball_radius, visual_radius: 0.25, vel: Vec3::ZERO, angular_vel: Vec3::ZERO },
         ));
 
-    // Shot indicator (emissive beam)
-    commands
-        .spawn(PbrBundle {
-            mesh: meshes.add(Mesh::from(Cuboid::from_size(Vec3::new(0.12, 0.12, 1.0)))),
-            material: mats.add(StandardMaterial {
-                base_color: Color::srgb(1.0, 0.85, 0.10),
-                emissive: LinearRgba::new(3.0, 2.0, 0.3, 1.0) * 0.5,
-                perceptual_roughness: 0.5,
-                metallic: 0.0,
+    // Shot indicator dots (predicted trajectory)
+    for i in 0..TRAJ_DOT_COUNT {
+        let tint = 0.3 + (i as f32 / TRAJ_DOT_COUNT as f32) * 0.7;
+        commands
+            .spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(Sphere { radius: 0.18 })),
+                material: mats.add(StandardMaterial {
+                    base_color: Color::srgb(1.0, 0.85 * tint, 0.10 * tint),
+                    emissive: LinearRgba::new(3.0, 2.0, 0.3, 1.0) * 0.2,
+                    unlit: false,
+                    ..default()
+                }),
+                transform: Transform::from_xyz(x, ground_h + 0.25, z),
+                visibility: Visibility::Hidden,
                 ..default()
-            }),
-            transform: Transform::from_xyz(x, ground_h + 0.25, z),
-            visibility: Visibility::Hidden,
-            ..default()
-        })
-        .insert(ShotIndicator);
+            })
+            .insert(ShotIndicator)
+            .insert(ShotIndicatorDot { index: i });
+    }
 
     // Target: floating duck model (now high floating & animated)
     let mut rng = thread_rng();
@@ -376,7 +389,6 @@ fn simple_ball_physics(
             if axis.length_squared() > 0.0 {
                 let desired_mag = speed / kin.visual_radius;
                 let desired = axis * desired_mag;
-                // Smoothly approach target spin to avoid jitter when terrain normal changes.
                 kin.angular_vel = if kin.angular_vel.length_squared() > 0.0 {
                     kin.angular_vel.lerp(desired, 0.35)
                 } else {
@@ -473,7 +485,7 @@ fn handle_shot_input(
     mut score: ResMut<Score>,
     mut q_ball: Query<(&Transform, &mut BallKinematic), (With<Ball>, Without<ShotIndicator>)>,
     q_cam: Query<&Transform, (With<OrbitCamera>, Without<Ball>, Without<ShotIndicator>)>,
-    mut q_indicator: Query<(&mut Transform, &mut Visibility), (With<ShotIndicator>, Without<Ball>, Without<OrbitCamera>)>,
+    mut q_indicators: Query<(&mut Transform, &mut Visibility, &ShotIndicatorDot), (With<ShotIndicator>, Without<Ball>, Without<OrbitCamera>)>,
     mut ev_shot: EventWriter<ShotFiredEvent>,
 ) {
     if score.game_over {
@@ -481,14 +493,15 @@ fn handle_shot_input(
     }
     let Ok((ball_t, mut kin)) = q_ball.get_single_mut() else { return; };
     let Ok(cam_t) = q_cam.get_single() else { return; };
-    let Ok((mut ind_t, mut vis)) = q_indicator.get_single_mut() else { return; };
 
     if buttons.just_pressed(MouseButton::Left) && state.mode == ShotMode::Idle {
         state.mode = ShotMode::Charging;
         state.power = 0.0;
         state.rising = true;
-        ind_t.translation = ball_t.translation + Vec3::Y * (kin.collider_radius * 0.5);
-        *vis = Visibility::Visible;
+        for (mut t, mut vis, _) in &mut q_indicators {
+            t.translation = ball_t.translation + Vec3::Y * (kin.collider_radius * 0.5);
+            *vis = Visibility::Visible;
+        }
     }
 
     if buttons.just_released(MouseButton::Left) && state.mode == ShotMode::Charging {
@@ -497,15 +510,19 @@ fn handle_shot_input(
         let angle = cfg.up_angle_deg.to_radians();
         let dir = (horiz * angle.cos() + Vec3::Y * angle.sin()).normalize_or_zero();
 
-        let impulse = cfg.base_impulse * state.power.max(0.05);
-        let shot_power = state.power;
+        // New power scaling: 25%..200% of base impulse
+        let power_scale = 0.25 + state.power * (2.0 - 0.25);
+        let impulse = cfg.base_impulse * power_scale;
+        let shot_power = power_scale;
         kin.vel += dir * impulse;
         score.shots += 1;
         ev_shot.send(ShotFiredEvent { pos: ball_t.translation, power: shot_power });
 
         state.mode = ShotMode::Idle;
         state.power = 0.0;
-        *vis = Visibility::Hidden;
+        for (_, mut vis, _) in &mut q_indicators {
+            *vis = Visibility::Hidden;
+        }
     }
 }
 
@@ -548,7 +565,8 @@ fn update_power_gauge(
                 text.sections[0].value = "Power: --".to_string();
             }
             ShotMode::Charging => {
-                text.sections[0].value = format!("Power: {:>3}%", (state.power * 100.0) as u32);
+                let power_scale = 0.25 + state.power * (2.0 - 0.25);
+                text.sections[0].value = format!("Power: {:>3}%", (power_scale * 100.0) as u32);
             }
         }
     }
@@ -590,7 +608,7 @@ fn update_shot_indicator(
     cfg: Res<ShotConfig>,
     q_ball: Query<&Transform, (With<Ball>, Without<ShotIndicator>)>,
     q_cam: Query<&Transform, (With<OrbitCamera>, Without<Ball>, Without<ShotIndicator>)>,
-    mut q_ind: Query<(&mut Transform, &Handle<StandardMaterial>, &mut Visibility), With<ShotIndicator>>,
+    mut q_ind: Query<(&mut Transform, &Handle<StandardMaterial>, &mut Visibility, &ShotIndicatorDot), (With<ShotIndicator>, Without<Ball>, Without<OrbitCamera>)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     if state.mode != ShotMode::Charging {
@@ -598,27 +616,29 @@ fn update_shot_indicator(
     }
     let Ok(ball_t) = q_ball.get_single() else { return; };
     let Ok(cam_t) = q_cam.get_single() else { return; };
-    let Ok((mut ind_t, mat_handle, mut vis)) = q_ind.get_single_mut() else { return; };
-    *vis = Visibility::Visible;
 
     let cam_to_ball = (ball_t.translation - cam_t.translation).normalize_or_zero();
     let horiz = Vec3::new(cam_to_ball.x, 0.0, cam_to_ball.z).normalize_or_zero();
     let angle = cfg.up_angle_deg.to_radians();
     let dir = (horiz * angle.cos() + Vec3::Y * angle.sin()).normalize_or_zero();
 
-    let len = cfg.indicator_base_len + cfg.indicator_var_len * state.power;
-    let base_pos = ball_t.translation + Vec3::Y * 0.1;
-    ind_t.translation = base_pos + dir * (len * 0.5);
-    ind_t.scale = Vec3::new(0.12, 0.12, len);
+    // Scaled launch velocity (25%..200% of base)
+    let power_scale = 0.25 + state.power * (2.0 - 0.25);
+    let v0 = dir * (cfg.base_impulse * power_scale);
+    let g = -9.81;
+    let origin = ball_t.translation + Vec3::Y * 0.1;
 
-    let from = Vec3::Z;
-    if dir.length_squared() > 0.0 {
-        ind_t.rotation = Quat::from_rotation_arc(from, dir);
-    }
+    for (mut t, mat_handle, mut vis, dot) in &mut q_ind {
+        *vis = Visibility::Visible;
+        let time = (dot.index as f32 + 1.0) * TRAJ_DOT_DT;
+        let displacement = v0 * time + 0.5 * Vec3::Y * g * time * time;
+        t.translation = origin + displacement;
 
-    if let Some(mat) = materials.get_mut(mat_handle) {
-        let intensity = 0.5 + state.power * 2.5;
-        mat.emissive = LinearRgba::new(3.0, 2.0, 0.3, 1.0) * intensity;
+        if let Some(mat) = materials.get_mut(mat_handle) {
+            let fade = 1.0 - (dot.index as f32 / TRAJ_DOT_COUNT as f32);
+            let intensity = 0.3 + power_scale * 0.4 * fade;
+            mat.emissive = LinearRgba::new(3.0, 2.0, 0.3, 1.0) * intensity;
+        }
     }
 }
 
@@ -674,12 +694,9 @@ fn update_target_motion(
 ) {
     let dt = time.delta_seconds();
     for (mut t, mut f) in &mut q {
-        // advance phase
         f.phase += dt * f.bounce_freq * std::f32::consts::TAU;
-        // vertical bob
         let y = f.ground + f.base_height + f.amplitude * f.phase.sin();
         t.translation.y = y;
-        // rotation
         t.rotate_local(Quat::from_rotation_y(f.rot_speed * dt));
     }
 }
