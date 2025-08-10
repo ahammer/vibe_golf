@@ -4,7 +4,7 @@
 
     sky: (
         texture: "skymap/kloppenheim_06_puresky_1k.hdr",
-        radius: 500.0,
+        radius: 4000.0, // large but within camera far (5000) so always rendered; appears at infinity without forcing huge far plane
         longitudes: 64,
         latitudes: 32,
     ),
