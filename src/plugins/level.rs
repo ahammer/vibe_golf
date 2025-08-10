@@ -91,11 +91,6 @@ pub struct LevelDef {
 
 // ----------------------- Components / Resources -----------------------
 
-#[derive(Component)]
-pub struct Wall {
-    pub normal: Vec3,
-    pub plane_d: f32,
-}
 
 // ----------------------- Plugin -----------------------
 
@@ -105,7 +100,7 @@ impl Plugin for LevelPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, load_level)
             .add_systems(Startup, spawn_level.after(load_level))
-            .add_systems(Update, (spawn_runtime_ball, update_wall_fade));
+            .add_systems(Update, spawn_runtime_ball);
     }
 }
 
@@ -207,51 +202,7 @@ fn spawn_level(
         },
     ));
 
-    // Walls
-    let half = level.world.half_extent;
-    let height = level.world.wall_height;
-    let thickness = 1.0;
-    let base_col = level.world.wall_color;
-    // X walls
-    for &sign in &[-1.0f32, 1.0] {
-        let material = mats.add(StandardMaterial {
-            base_color: Color::srgba(base_col.0, base_col.1, base_col.2, base_col.3),
-            alpha_mode: AlphaMode::Blend,
-            unlit: true,
-            ..default()
-        });
-        commands.spawn((
-            PbrBundle {
-                mesh: meshes.add(Mesh::from(bevy::math::primitives::Cuboid {
-                    half_size: Vec3::new(thickness * 0.5, height * 0.5, half),
-                })),
-                material,
-                transform: Transform::from_xyz(sign * half, height * 0.5, 0.0),
-                ..default()
-            },
-            Wall { normal: Vec3::new(sign, 0.0, 0.0), plane_d: sign * half },
-        ));
-    }
-    // Z walls
-    for &sign in &[-1.0f32, 1.0] {
-        let material = mats.add(StandardMaterial {
-            base_color: Color::srgba(base_col.0, base_col.1, base_col.2, base_col.3),
-            alpha_mode: AlphaMode::Blend,
-            unlit: true,
-            ..default()
-        });
-        commands.spawn((
-            PbrBundle {
-                mesh: meshes.add(Mesh::from(bevy::math::primitives::Cuboid {
-                    half_size: Vec3::new(half, height * 0.5, thickness * 0.5),
-                })),
-                material,
-                transform: Transform::from_xyz(0.0, height * 0.5, sign * half),
-                ..default()
-            },
-            Wall { normal: Vec3::new(0.0, 0.0, sign), plane_d: sign * half },
-        ));
-    }
+    // Open world: removed enclosing walls
 
     // Inject ShotConfig override from level
     commands.insert_resource(ShotConfig {
@@ -299,31 +250,6 @@ fn spawn_runtime_ball(
     ));
 }
 
-// Fade walls based on proximity to ball
-fn update_wall_fade(
-    level: Option<Res<LevelDef>>,
-    q_ball: Query<&Transform, With<Ball>>,
-    mut q_walls: Query<(&Wall, &Handle<StandardMaterial>)>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    let (Some(level), Ok(ball_t)) = (level, q_ball.get_single()) else { return; };
-    let bx = ball_t.translation.x.abs();
-    let bz = ball_t.translation.z.abs();
-    for (wall, mat_handle) in &mut q_walls {
-        if let Some(mat) = materials.get_mut(mat_handle) {
-            let dist_to_wall = if wall.normal.x != 0.0 {
-                (level.world.half_extent - bx).max(0.0)
-            } else if wall.normal.z != 0.0 {
-                (level.world.half_extent - bz).max(0.0)
-            } else {
-                level.world.wall_fade_distance
-            };
-            let alpha = (1.0 - (dist_to_wall / level.world.wall_fade_distance)).clamp(0.0, 1.0);
-            let (r, g, b, _) = level.world.wall_color;
-            mat.base_color = Color::srgba(r, g, b, alpha);
-        }
-    }
-}
 
 // ----------------------- Utilities -----------------------
 

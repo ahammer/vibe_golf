@@ -196,6 +196,6 @@ pub fn build_terrain_graph(cfg: &crate::plugins::terrain::TerrainConfig) -> Node
         warp_amplitude: cfg.warp_amplitude,
     }) as NodeRef;
 
-    // Crater shaping
-    Arc::new(CraterShapeNode { input: warped }) as NodeRef
+    // No crater shaping (open world)
+    warped
 }

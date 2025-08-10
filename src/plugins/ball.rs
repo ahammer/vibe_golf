@@ -35,25 +35,7 @@ fn ball_physics(
     kin.vel.y += g * dt;
     t.translation += kin.vel * dt;
 
-    // World boundary bounce from level definition
-    if let Some(level) = level {
-        let limit = level.world.half_extent - kin.collider_radius;
-        let restitution = level.world.wall_restitution;
-        if t.translation.x.abs() > limit {
-            let sign = t.translation.x.signum();
-            t.translation.x = sign * limit;
-            if kin.vel.x * sign > 0.0 {
-                kin.vel.x = -kin.vel.x * restitution;
-            }
-        }
-        if t.translation.z.abs() > limit {
-            let sign = t.translation.z.signum();
-            t.translation.z = sign * limit;
-            if kin.vel.z * sign > 0.0 {
-                kin.vel.z = -kin.vel.z * restitution;
-            }
-        }
-    }
+    // Removed world boundary bounce (open world)
 
     // Terrain interaction
     let h = sampler.height(t.translation.x, t.translation.z);
