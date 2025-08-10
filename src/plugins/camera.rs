@@ -206,16 +206,8 @@ fn orbit_camera_apply(
 
     let raw_target = ball_t.translation + Vec3::Y * cfg.target_height_offset;
 
-    // Speed-limited target smoothing
-    let dt = time.delta_seconds();
-    let max_target_step = cfg.target_max_speed * dt;
-    let to_target = raw_target - follow.smoothed_target;
-    let dist_t = to_target.length();
-    if dist_t <= max_target_step || dist_t == 0.0 {
-        follow.smoothed_target = raw_target;
-    } else {
-        follow.smoothed_target += to_target / dist_t * max_target_step;
-    }
+    // Immediate target (no smoothing / perfect follow)
+    follow.smoothed_target = raw_target;
 
     // Desired camera position (based on smoothed target)
     let rot = Quat::from_rotation_y(state.yaw) * Quat::from_rotation_x(state.pitch);

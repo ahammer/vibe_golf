@@ -75,8 +75,8 @@ impl Default for TerrainConfig {
             rim_peak: 150.0,
             rim_height: 10.0,
             vegetation_per_chunk: 40,
-            mountain_height: 28.0,
-            valley_depth: 12.0,
+            mountain_height: 20.0,
+            valley_depth: 8.0,
         }
     }
 }
@@ -125,11 +125,11 @@ impl TerrainSampler {
         let valley_t = smooth(cfg.valley_end, cfg.valley_start, macro_v); // reversed (higher when macro_v lower)
 
         // Scale base undulations: valleys slightly smoother, mountains amplify relief
-        let relief_scale = 0.75 + 0.55 * mountain_t + 0.25 * valley_t;
+        let relief_scale = 0.70 + 0.40 * mountain_t + 0.20 * valley_t;
 
         // Add large scale offsets: uplift mountains, depress valleys
-        let uplift = mountain_t.powf(1.35) * cfg.mountain_height;
-        let depress = valley_t.powf(1.25) * cfg.valley_depth;
+        let uplift = mountain_t.powf(1.15) * cfg.mountain_height;
+        let depress = valley_t.powf(1.05) * cfg.valley_depth;
 
         (base * relief_scale + uplift - depress) * cfg.amplitude
     }
@@ -181,7 +181,7 @@ impl Plugin for TerrainPlugin {
         app.insert_resource(TerrainConfig::default())
             .add_systems(PreStartup, init_sampler)
             .insert_resource(LoadedChunks::default())
-            .add_systems(Update, (update_terrain_chunks, populate_chunk_vegetation));
+            .add_systems(Update, (update_terrain_chunks, populate_chunk_vegetation, align_vegetation));
     }
 }
 
@@ -329,6 +329,34 @@ fn populate_chunk_vegetation(
                 placed += 1;
             }
         });
+    }
+}
+
+fn align_vegetation(
+    sampler: Res<TerrainSampler>,
+    mut q_added: Query<&mut Transform, (With<VegetationInstance>, Added<VegetationInstance>)>,
+) {
+    for mut t in &mut q_added {
+        let x = t.translation.x;
+        let z = t.translation.z;
+        let h = sampler.height(x, z);
+        t.translation.y = h;
+        let n = sampler.normal(x, z);
+
+        // Limit tilt for stylization (max ~17 degrees)
+        let max_tilt = 0.30_f32;
+        let up = Vec3::Y;
+        let angle = up.angle_between(n);
+        if angle > 1e-3 {
+            let clamped = angle.min(max_tilt);
+            let axis = up.cross(n).normalize_or_zero();
+            if axis.length_squared() > 0.0 {
+                let q = Quat::from_axis_angle(axis, clamped);
+                // Preserve existing yaw (world up rotation)
+                let yaw = t.rotation.to_euler(EulerRot::YXZ).0;
+                t.rotation = Quat::from_rotation_y(yaw) * q;
+            }
+        }
     }
 }
 
