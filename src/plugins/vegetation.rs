@@ -72,20 +72,27 @@ pub struct VegetationConfig {
     pub scale_max: f32,
     pub samples_per_frame: usize, // grid cells evaluated per frame
     pub batch_spawn_flush: usize, // flush batch when queued >= this
+    // Minimum spacing (approx) between accepted trees per region (pseudo blue-noise)
+    pub min_spacing_inner: f32,
+    pub min_spacing_slope: f32,
+    pub min_spacing_rim: f32,
 }
 impl Default for VegetationConfig {
     fn default() -> Self {
         Self {
-            cell_size: 4.0,
+            cell_size: 6.0,          // slightly finer to allow more candidate coverage (full view)
             noise_freq: 0.035,
             base_density: 1.0,
-            threshold: 0.50,
-            max_instances: 3000,
+            threshold: 0.50,         // allow a few more candidates; spacing still governs clustering
+            max_instances: 2600,     // higher cap to fill entire visible small level
             min_slope_normal_y: 0.70,
             scale_min: 5.0,
             scale_max: 10.0,
-            samples_per_frame: 650,
+            samples_per_frame: 700,  // finish population quickly
             batch_spawn_flush: 256,
+            min_spacing_inner: 22.0, // inner area very sparse
+            min_spacing_slope: 12.0, // moderate spacing on slopes
+            min_spacing_rim: 8.0,    // rim denser but spaced to avoid clumps
         }
     }
 }
@@ -93,16 +100,18 @@ impl Default for VegetationConfig {
 // Distance culling configuration
 #[derive(Resource)]
 pub struct VegetationCullingConfig {
-    pub max_distance: f32,    // soft visibility radius
-    pub hysteresis: f32,      // +/- band to avoid popping
-    pub update_interval: f32, // seconds between passes
+    pub max_distance: f32,     // soft visibility radius (ignored if distance culling disabled)
+    pub hysteresis: f32,       // +/- band to avoid popping
+    pub update_interval: f32,  // seconds between passes
+    pub enable_distance: bool, // if false, no distance-based hide (full population always visible)
 }
 impl Default for VegetationCullingConfig {
     fn default() -> Self {
         Self {
-            max_distance: 160.0,
+            max_distance: 1200.0, // large enough to cover full small level
             hysteresis: 14.0,
             update_interval: 0.33,
+            enable_distance: false,
         }
     }
 }
@@ -161,16 +170,16 @@ impl Default for VegetationPerfTuner {
             target_fps: 120.0,
             low_band: 0.92,   // tighten below ~110 FPS
             high_band: 1.05,  // relax above ~126 FPS
-            default_cull: 160.0,
+            default_cull: 200.0,       // updated to match increased draw distance
             default_shadow_on: 110.0,
             default_shadow_off: 135.0,
-            min_cull: 110.0,
-            max_cull: 220.0,
+            min_cull: 130.0,
+            max_cull: 240.0,
             min_shadow_on: 60.0,
             max_shadow_on: 140.0,
             min_shadow_off: 80.0,
-            max_shadow_off: 190.0,
-            adjust_step: 5.0,
+            max_shadow_off: 200.0,
+            adjust_step: 6.0,
         }
     }
 }
@@ -192,8 +201,10 @@ struct VegetationSpawnState {
     attempts: usize,
     early_noise_rejects: usize,
     slope_rejects: usize,
+    inner_spawned: usize, // count of accepted inner play-area trees
     finished: bool,
     batch: Vec<(SceneBundle, (Tree, TreeCulled, TreeLod))>, // reusable batch buffer
+    accepted_positions: Vec<Vec2>, // for spacing rejection
 }
 
 // Data structure passed through functional stages
@@ -311,8 +322,10 @@ fn prepare_vegetation(
         attempts: 0,
         early_noise_rejects: 0,
         slope_rejects: 0,
+        inner_spawned: 0,
         finished: false,
         batch: Vec::with_capacity(cfg.batch_spawn_flush),
+        accepted_positions: Vec::new(),
     });
 }
 
@@ -341,10 +354,48 @@ fn progressive_spawn_trees(
         let p = jitter_point(base, cfg.cell_size, &mut rng);
 
         // Cheap masks first
-        let r_mask = radial_mask(p, sampler.cfg.play_radius);
+        // Radial base mask (clears very center smoothly)
+        let r_mask_raw = radial_mask(p, sampler.cfg.play_radius);
+        if r_mask_raw <= 0.0 {
+            continue;
+        }
+
+        let r_len = p.length();
+        let play_r = sampler.cfg.play_radius;
+        let rim_start = sampler.cfg.rim_start;
+        let rim_peak = sampler.cfg.rim_peak;
+
+        // Region weighting strategy:
+        //  - Inner deep center (< 0.5 * play_r): none
+        //  - Inner play area (0.5*play_r .. play_r): sparse (target ~40–50 total)
+        //  - Slope band (play_r .. rim_start): moderate increasing density
+        //  - Rim band (rim_start .. rim_peak): highest density
+        let mut region_inner = false;
+        let weight = if r_len < play_r * 0.5 {
+            0.0
+        } else if r_len < play_r {
+            region_inner = true;
+            0.10 // sparse inner area
+        } else if r_len < rim_start {
+            let t = ((r_len - play_r) / (rim_start - play_r)).clamp(0.0, 1.0);
+            let smooth = t * t * (3.0 - 2.0 * t);
+            0.35 + 0.35 * smooth // 0.35 -> 0.70 across slope
+        } else {
+            let t = ((r_len - rim_start) / (rim_peak - rim_start)).clamp(0.0, 1.0);
+            let smooth = t * t * (3.0 - 2.0 * t);
+            0.70 + 0.30 * smooth // 0.70 -> 1.0 across rim band
+        };
+
+        // Enforce sparse inner quota cap (~50)
+        if weight > 0.0 && region_inner && state.inner_spawned >= 50 {
+            continue;
+        }
+
+        let r_mask = r_mask_raw * weight;
         if r_mask <= 0.0 {
             continue;
         }
+
         let n_val = noise_density(&assets.perlin, p, cfg.noise_freq);
 
         let prelim = cfg.base_density * n_val * r_mask;
@@ -367,10 +418,34 @@ fn progressive_spawn_trees(
             height: h,
             normal: n,
             noise_norm: n_val,
-            radial_mask: r_mask,
+            radial_mask: r_mask, // already includes ring emphasis & inner suppression
             slope_mask: s_mask,
             density,
         };
+
+        // Region-specific minimum spacing
+        let spacing = if r_len < play_r {
+            cfg.min_spacing_inner
+        } else if r_len < rim_start {
+            cfg.min_spacing_slope
+        } else {
+            cfg.min_spacing_rim
+        };
+
+        // Simple O(n) blue-noise style rejection (counts are low enough)
+        let mut too_close = false;
+        if spacing > 0.0 {
+            let spacing2 = spacing * spacing;
+            for prev in &state.accepted_positions {
+                if prev.distance_squared(candidate.pos) < spacing2 {
+                    too_close = true;
+                    break;
+                }
+            }
+        }
+        if too_close {
+            continue;
+        }
 
         if decide_spawn(candidate.density, cfg.threshold) {
             let handle = random_tree_handle(&mut rng, &assets.tree1, &assets.tree2);
@@ -383,6 +458,10 @@ fn progressive_spawn_trees(
                 },
                 (Tree, TreeCulled(false), TreeLod { shadows_on: true }),
             ));
+            if region_inner {
+                state.inner_spawned += 1;
+            }
+            state.accepted_positions.push(candidate.pos);
             state.spawned += 1;
         }
 
@@ -412,8 +491,8 @@ fn progressive_spawn_trees(
     if state.cursor >= total_points || state.spawned >= cfg.max_instances {
         state.finished = true;
         info!(
-            "Vegetation build complete: spawned {} / attempts {} (early_noise_rejects={}, slope_rejects={}, points={})",
-            state.spawned, state.attempts, state.early_noise_rejects, state.slope_rejects, total_points
+            "Vegetation build complete: spawned {} (inner={}) / attempts {} (early_noise_rejects={}, slope_rejects={}, points={})",
+            state.spawned, state.inner_spawned, state.attempts, state.early_noise_rejects, state.slope_rejects, total_points
         );
     }
 }
@@ -425,6 +504,10 @@ fn cull_trees(
     q_ball: Query<&Transform, With<Ball>>,
     mut q_trees: Query<(&mut Visibility, &Transform, &mut TreeCulled), With<Tree>>,
 ) {
+    // If distance culling disabled we keep everything visible (visibility managed only by Bevy frustum).
+    if !cfg.enable_distance {
+        return;
+    }
     if !state.timer.tick(time.delta()).just_finished() {
         return;
     }
@@ -525,7 +608,7 @@ fn vegetation_perf_tuner(
     // Decide direction
     if ratio < tuner.low_band {
         // Tighten: reduce cull distance & shadow ranges
-        if cull_cfg.max_distance > tuner.min_cull {
+        if cull_cfg.enable_distance && cull_cfg.max_distance > tuner.min_cull {
             cull_cfg.max_distance = (cull_cfg.max_distance - tuner.adjust_step).max(tuner.min_cull);
         }
         if lod_cfg.shadows_full_on > tuner.min_shadow_on {
@@ -536,7 +619,7 @@ fn vegetation_perf_tuner(
         }
     } else if ratio > tuner.high_band {
         // Relax toward defaults (not past maxima)
-        if cull_cfg.max_distance < tuner.default_cull {
+        if cull_cfg.enable_distance && cull_cfg.max_distance < tuner.default_cull {
             cull_cfg.max_distance = (cull_cfg.max_distance + tuner.adjust_step).min(tuner.default_cull.min(tuner.max_cull));
         }
         if lod_cfg.shadows_full_on < tuner.default_shadow_on {
@@ -547,7 +630,7 @@ fn vegetation_perf_tuner(
         }
     } else {
         // In band: gentle drift back toward defaults
-        if (cull_cfg.max_distance - tuner.default_cull).abs() > 1.0 {
+        if cull_cfg.enable_distance && (cull_cfg.max_distance - tuner.default_cull).abs() > 1.0 {
             if cull_cfg.max_distance < tuner.default_cull {
                 cull_cfg.max_distance = (cull_cfg.max_distance + tuner.adjust_step * 0.5).min(tuner.default_cull);
             } else {
