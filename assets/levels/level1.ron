@@ -21,11 +21,13 @@
         model: "models/ducky.glb#Scene0",
         initial: (x: 0.0, z: 80.0),
         float: (
-            base_height: 30.0,
-            amplitude: 10.0,
+            // Reduced so target rests on ground (base_height == amplitude keeps min at ground)
+            base_height: 0.6,
+            amplitude: 0.6,
             bob_freq: 0.5,
             rot_speed: 0.4,
-            collider_radius: 3.0,
+            // Tripled hit box for easier hits
+            collider_radius: 9.0,
         ),
     ),
 
