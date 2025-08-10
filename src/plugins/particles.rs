@@ -1,7 +1,7 @@
 // Particle & FX systems now using candy_1 / candy_2 glb models for burst/explosion/confetti effects.
 use bevy::prelude::*;
-use bevy::math::primitives::Sphere;
 use rand::prelude::*;
+use crate::plugins::ball::Ball;
 
 pub struct ParticlePlugin;
 
@@ -65,8 +65,8 @@ impl Default for AtmosDustConfig {
         Self {
             count: 220,
             half_extent: 140.0,
-            min_y: 1.0,
-            max_y: 24.0,
+            min_y: 11.0, // raised 10m higher
+            max_y: 34.0,
             rise_speed: 0.15,
         }
     }
@@ -214,17 +214,26 @@ fn setup_atmospheric_dust(
     mut commands: Commands,
     cfg: Res<AtmosDustConfig>,
     snow: Res<SnowflakeModel>,
+    q_ball: Query<&Transform, With<Ball>>,
 ) {
+    let center = q_ball.get_single().map(|t| t.translation).unwrap_or(Vec3::ZERO);
     let mut rng = thread_rng();
     for _ in 0..cfg.count {
-        let x = rng.gen_range(-cfg.half_extent..=cfg.half_extent);
-        let y = rng.gen_range(40.0..80.0); // lowered altitude
-        let z = rng.gen_range(-cfg.half_extent..=cfg.half_extent);
-        let max_scale = rng.gen_range(8.75..17.5); // half previous size (was 17.5..35.0)
+        let x = center.x + rng.gen_range(-cfg.half_extent..=cfg.half_extent);
+        let y = rng.gen_range(cfg.min_y..cfg.max_y);
+        let z = center.z + rng.gen_range(-cfg.half_extent..=cfg.half_extent);
+        let lifetime = rng.gen_range(15.0..30.0);
+        let age = rng.gen_range(0.0..lifetime);
+        let max_scale = rng.gen_range(1.0..4.0); // quarter previous size
         let angular = Vec3::new(
             rng.gen_range(-0.4..0.4),
             rng.gen_range(-0.4..0.4),
             rng.gen_range(-0.4..0.4),
+        );
+        let vel = Vec3::new(
+            rng.gen_range(-0.12..0.12),
+            rng.gen_range(-0.35..-0.08),
+            rng.gen_range(-0.12..0.12),
         );
         commands.spawn((
             SceneBundle {
@@ -235,10 +244,10 @@ fn setup_atmospheric_dust(
             },
             ParticleKind::DustAtmos,
             Particle {
-                lifetime: 20.0,
-                age: 0.0,
+                lifetime,
+                age,
                 gravity: 0.0,
-                vel: Vec3::ZERO,
+                vel,
                 angular_vel: angular,
                 start_scale: Vec3::ZERO,
                 end_scale: Vec3::splat(max_scale),
@@ -571,10 +580,16 @@ fn spawn_confetti_on_game_over(
 fn update_particles(
     mut commands: Commands,
     time: Res<Time>,
-    mut q: Query<(Entity, &mut Transform, &mut Particle, &ParticleKind)>,
+    cfg: Res<AtmosDustConfig>,
+    mut sets: ParamSet<(
+        Query<&Transform, With<Ball>>,
+        Query<(Entity, &mut Transform, &mut Particle, &ParticleKind)>,
+    )>,
 ) {
     let dt = time.delta_seconds();
-    for (e, mut t, mut p, kind) in &mut q {
+    let mut rng = thread_rng();
+    let center = sets.p0().get_single().map(|t| t.translation).unwrap_or(Vec3::ZERO);
+    for (e, mut t, mut p, kind) in sets.p1().iter_mut() {
         p.age += dt;
         // Integrate motion (all manual now)
         p.vel.y += p.gravity * dt;
@@ -602,8 +617,48 @@ fn update_particles(
         }
 
         if p.age >= p.lifetime {
-            commands.entity(e).despawn_recursive();
-            continue;
+            if matches!(kind, ParticleKind::DustAtmos) {
+                // Re-seed around player so snow follows
+                p.lifetime = rng.gen_range(15.0..30.0);
+                p.age = 0.0;
+                p.end_scale = Vec3::splat(rng.gen_range(1.0..4.0));
+                p.vel = Vec3::new(
+                    rng.gen_range(-0.12..0.12),
+                    rng.gen_range(-0.35..-0.08),
+                    rng.gen_range(-0.12..0.12),
+                );
+                t.translation = center + Vec3::new(
+                    rng.gen_range(-cfg.half_extent..=cfg.half_extent),
+                    rng.gen_range(cfg.min_y..cfg.max_y),
+                    rng.gen_range(-cfg.half_extent..=cfg.half_extent),
+                );
+                t.scale = Vec3::ZERO;
+                continue;
+            } else {
+                commands.entity(e).despawn_recursive();
+                continue;
+            }
+        }
+        // If atmospheric snow drifts too far from player, recycle early
+        if matches!(kind, ParticleKind::DustAtmos) {
+            let horiz = Vec2::new(t.translation.x - center.x, t.translation.z - center.z).length();
+            if horiz > cfg.half_extent * 1.2 {
+                p.lifetime = rng.gen_range(15.0..30.0);
+                p.age = 0.0;
+                p.end_scale = Vec3::splat(rng.gen_range(1.0..4.0));
+                p.vel = Vec3::new(
+                    rng.gen_range(-0.12..0.12),
+                    rng.gen_range(-0.35..-0.08),
+                    rng.gen_range(-0.12..0.12),
+                );
+                t.translation = center + Vec3::new(
+                    rng.gen_range(-cfg.half_extent..=cfg.half_extent),
+                    rng.gen_range(cfg.min_y..cfg.max_y),
+                    rng.gen_range(-cfg.half_extent..=cfg.half_extent),
+                );
+                t.scale = Vec3::ZERO;
+                continue;
+            }
         }
         // (Fade skipped for glb candy models)
     }
