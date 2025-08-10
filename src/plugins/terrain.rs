@@ -182,7 +182,8 @@ impl Plugin for TerrainPlugin {
         app.insert_resource(TerrainConfig::default())
             .add_systems(PreStartup, init_sampler)
             .insert_resource(LoadedChunks::default())
-            .add_systems(Update, (update_terrain_chunks, populate_chunk_vegetation, align_vegetation));
+            // Removed per-chunk decorative vegetation systems; global VegetationPlugin now solely manages trees.
+            .add_systems(Update, update_terrain_chunks);
     }
 }
 
@@ -264,12 +265,11 @@ fn populate_chunk_vegetation(
     assets: Res<AssetServer>,
     q_new: Query<(Entity, &TerrainChunk, &Transform), Added<TerrainChunk>>,
 ) {
+    // Removed tree & meatball models here to avoid duplicate tiny trees and extra "balls".
+    // Tree placement handled by global vegetation system in vegetation.rs.
     let models = [
-        "models/tree_1.glb#Scene0",
-        "models/tree_2.glb#Scene0",
         "models/candy_1.glb#Scene0",
         "models/candy_2.glb#Scene0",
-        "models/meatball.glb#Scene0",
         "models/snowflake.glb#Scene0",
     ];
     for (chunk_entity, _chunk, t_chunk) in &q_new {
@@ -317,9 +317,8 @@ fn populate_chunk_vegetation(
 
                 let model = models[random::<usize>() % models.len()];
                 let r = random::<f32>();
-                // Scale influenced by valley/mountain (larger in valleys)
-                let scale_bias = 0.4 + valley_t * 0.8;
-                let scale = (0.4 + (r * r) * 1.8) * scale_bias.clamp(0.5, 1.4);
+                // Simplified, consistent decorative prop scale (avoid tiny tree artifacts).
+                let scale = 1.0 + r * 0.8; // 1.0 .. 1.8
                 c.spawn((
                     SceneBundle {
                         scene: assets.load(model),

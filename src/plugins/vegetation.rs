@@ -533,32 +533,18 @@ fn progressive_spawn_trees(
 
         if decide_spawn(candidate.density, cfg.threshold) {
             let transform = build_transform(&candidate, &mut rng, &cfg);
-            if variants.ready && !variants.variants.is_empty() {
-                // Use instanced mesh/material variant
-                let (mesh, material) = &variants.variants[rng.gen_range(0..variants.variants.len())];
-                commands.spawn((
-                    PbrBundle {
-                        mesh: mesh.clone(),
-                        material: material.clone(),
-                        transform,
-                        ..default()
-                    },
-                    Tree,
-                    TreeCulled(false),
-                    TreeLod { shadows_on: true },
-                ));
-            } else {
-                // Fallback: spawn full scene (pre-extraction)
-                let handle = random_tree_handle(&mut rng, &assets.tree1, &assets.tree2);
-                state.batch.push((
-                    SceneBundle {
-                        scene: handle,
-                        transform,
-                        ..default()
-                    },
-                    (Tree, TreeCulled(false), TreeLod { shadows_on: true }),
-                ));
-            }
+            // Temporarily disable raw mesh instancing because original child node offsets + scales
+            // are lost, causing underground / tiny trees. Always spawn full scene until we
+            // implement capturing per-mesh local transforms.
+            let handle = random_tree_handle(&mut rng, &assets.tree1, &assets.tree2);
+            state.batch.push((
+                SceneBundle {
+                    scene: handle,
+                    transform,
+                    ..default()
+                },
+                (Tree, TreeCulled(false), TreeLod { shadows_on: true }),
+            ));
             if region_inner {
                 state.inner_spawned += 1;
             }
