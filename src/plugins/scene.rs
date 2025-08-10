@@ -161,6 +161,7 @@ const WORLD_HALF_EXTENT: f32 = 384.0 * 0.5 - 5.0;
 const WALL_HEIGHT: f32 = 120.0;
 const WALL_FADE_DISTANCE: f32 = 60.0;
 const WALL_RESTITUTION: f32 = 0.6;
+const WALL_COLOR: (f32, f32, f32) = (0.2, 0.5, 0.9);
 
 // Generate an inside-facing (inverted) UV sphere suitable for equirectangular sky textures.
 fn generate_inverted_sphere(longitudes: u32, latitudes: u32, radius: f32) -> Mesh {
@@ -340,26 +341,26 @@ fn setup_scene(
             },
         ));
 
-    // Spawn boundary walls (fade in when ball is near).
-    let wall_material = mats.add(StandardMaterial {
-        base_color: Color::srgba(0.2, 0.5, 0.9, 0.0),
-        alpha_mode: AlphaMode::Blend,
-        unlit: true,
-        ..default()
-    });
-
+    // Spawn boundary walls (individually materialized so each fades independently).
     let half = WORLD_HALF_EXTENT;
     let height = WALL_HEIGHT;
     let thickness = 1.0;
+    let base_wall_color = Color::srgba(WALL_COLOR.0, WALL_COLOR.1, WALL_COLOR.2, 0.0);
 
     // X walls (at +/- X, extending along Z)
     for &sign in &[-1.0f32, 1.0] {
+        let material = mats.add(StandardMaterial {
+            base_color: base_wall_color,
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        });
         commands.spawn((
             PbrBundle {
                 mesh: meshes.add(Mesh::from(Cuboid {
                     half_size: Vec3::new(thickness * 0.5, height * 0.5, half),
                 })),
-                material: wall_material.clone(),
+                material,
                 transform: Transform::from_xyz(sign * half, height * 0.5, 0.0),
                 ..default()
             },
@@ -368,12 +369,18 @@ fn setup_scene(
     }
     // Z walls (at +/- Z, extending along X)
     for &sign in &[-1.0f32, 1.0] {
+        let material = mats.add(StandardMaterial {
+            base_color: base_wall_color,
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        });
         commands.spawn((
             PbrBundle {
                 mesh: meshes.add(Mesh::from(Cuboid {
                     half_size: Vec3::new(half, height * 0.5, thickness * 0.5),
                 })),
-                material: wall_material.clone(),
+                material,
                 transform: Transform::from_xyz(0.0, height * 0.5, sign * half),
                 ..default()
             },
@@ -779,12 +786,22 @@ fn update_wall_fade(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let Ok(ball_t) = q_ball.get_single() else { return; };
-    let pos = ball_t.translation;
+    let bx = ball_t.translation.x.abs();
+    let bz = ball_t.translation.z.abs();
+    let half = WORLD_HALF_EXTENT;
+
     for (wall, mat_handle) in &mut q_walls {
         if let Some(mat) = materials.get_mut(mat_handle) {
-            let dist = (wall.normal.dot(pos) - wall.plane_d).abs();
-            let alpha = (1.0 - (dist / WALL_FADE_DISTANCE)).clamp(0.0, 1.0);
-            mat.base_color = Color::srgba(0.2, 0.5, 0.9, alpha);
+            // Compute remaining distance along the axis this wall constrains.
+            let dist_to_wall = if wall.normal.x != 0.0 {
+                (half - bx).max(0.0)
+            } else if wall.normal.z != 0.0 {
+                (half - bz).max(0.0)
+            } else {
+                WALL_FADE_DISTANCE
+            };
+            let alpha = (1.0 - (dist_to_wall / WALL_FADE_DISTANCE)).clamp(0.0, 1.0);
+            mat.base_color = Color::srgba(WALL_COLOR.0, WALL_COLOR.1, WALL_COLOR.2, alpha);
         }
     }
 }
