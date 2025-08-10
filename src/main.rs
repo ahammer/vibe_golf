@@ -6,41 +6,24 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
 
-pub mod plugins {
-    pub mod core_sim;
-    pub mod game_state;
-    pub mod level;
-    pub mod ball;
-    pub mod target;
-    pub mod shooting;
-    pub mod autoplay;
-    pub mod hud;
-    pub mod camera;
-    pub mod terrain;
-    pub mod terrain_graph;
-    pub mod particles;
-    pub mod game_audio;
-    pub mod contour_material;
-    pub mod vegetation;
-    pub mod main_menu;
-}
-use plugins::core_sim::CoreSimPlugin;
-use plugins::game_state::GameStatePlugin;
-use plugins::level::LevelPlugin;
-use plugins::ball::BallPlugin;
-use plugins::target::TargetPlugin;
-use plugins::shooting::ShootingPlugin;
-use plugins::hud::HudPlugin;
-use plugins::camera::CameraPlugin;
-use plugins::terrain::TerrainPlugin;
-use plugins::vegetation::VegetationPlugin;
-use plugins::particles::ParticlePlugin;
-use plugins::game_audio::GameAudioPlugin;
-use plugins::contour_material::ContourMaterialPlugin;
-use plugins::main_menu::MainMenuPlugin;
+use vibe_golf::plugins::{
+    core_sim::CoreSimPlugin,
+    game_state::GameStatePlugin,
+    level::LevelPlugin,
+    ball::BallPlugin,
+    target::TargetPlugin,
+    shooting::ShootingPlugin,
+    hud::HudPlugin,
+    camera::CameraPlugin,
+    terrain::TerrainPlugin,
+    vegetation::VegetationPlugin,
+    particles::ParticlePlugin,
+    game_audio::GameAudioPlugin,
+    contour_material::ContourMaterialPlugin,
+    main_menu::MainMenuPlugin,
+};
 
-mod screenshot;
-use screenshot::{ScreenshotPlugin, ScreenshotConfig};
+use vibe_golf::screenshot::{ScreenshotPlugin, ScreenshotConfig};
 
 fn main() {
     let screenshot_enabled = !std::env::args().any(|a| a == "--no-screenshot");
@@ -57,19 +40,20 @@ fn main() {
             ..default()
         }))
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
+        // Gameplay & rendering plugins (order preserved)
         .add_plugins(CoreSimPlugin)         // timing + shared resources
         .add_plugins(ContourMaterialPlugin) // custom contour material (shader)
         .add_plugins(TerrainPlugin)         // procedural terrain
         .add_plugins(VegetationPlugin)      // procedural vegetation (trees)
-        .add_plugins(ParticlePlugin)        // particle & FX systems (register events before gameplay systems use them)
+        .add_plugins(ParticlePlugin)        // particle & FX systems
         .add_plugins(GameAudioPlugin)       // game audio (music + sfx)
         .add_plugins(GameStatePlugin)       // shot state, scoring
         .add_plugins(MainMenuPlugin)        // main menu (Play/Quit/High Score)
-        .add_plugins(LevelPlugin)           // level loading & world entities (camera, sky, walls, spawn ball/target)
+        .add_plugins(LevelPlugin)           // level loading & world entities
         .add_plugins(BallPlugin)            // ball physics
         .add_plugins(TargetPlugin)          // target motion + hit detection
         .add_plugins(ShootingPlugin)        // shooting input & trajectory UI
-        // .add_plugins(AutoplayPlugin)     // disabled: automated swings
+        // .add_plugins(AutoplayPlugin)     // optional automated swings
         .add_plugins(HudPlugin)             // HUD (score/time)
         .add_plugins(CameraPlugin)          // camera follow/orbit
         .add_plugins(ScreenshotPlugin)      // screenshot capture

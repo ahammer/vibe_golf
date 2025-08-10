@@ -286,7 +286,6 @@ struct VegetationSpawnState {
     inner_spawned: usize,
     finished: bool,
     batch: Vec<(SceneBundle, (Tree, TreeCulled, TreeLod))>,
-    accepted_positions: Vec<Vec2>, // still retained for debug / metrics
     spacing_grid: SpacingGrid,
 }
 
@@ -445,7 +444,6 @@ fn prepare_vegetation(
         inner_spawned: 0,
         finished: false,
         batch: Vec::with_capacity(cfg.batch_spawn_flush),
-        accepted_positions: Vec::new(),
         spacing_grid: SpacingGrid::new(spacing_cell),
     });
 
@@ -625,7 +623,6 @@ fn progressive_spawn_trees(
         if region_inner {
             state.inner_spawned += 1;
         }
-        state.accepted_positions.push(candidate.pos);
         state.spacing_grid.insert(candidate.pos);
         state.spawned += 1;
 
