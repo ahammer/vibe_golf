@@ -108,17 +108,83 @@ impl FromWorld for CandyModels {
     }
 }
 
+// GPU instancing variants extracted from candy scenes
+#[derive(Resource, Default)]
+struct CandyMeshVariants {
+    ready: bool,
+    variants: Vec<(Handle<Mesh>, Handle<StandardMaterial>)>,
+}
+
+#[derive(Component)]
+struct CandyTemplate;
+
+fn spawn_candy_templates(mut commands: Commands, candy: Res<CandyModels>) {
+    for (i, handle) in candy.candy.iter().enumerate() {
+        commands.spawn((
+            SceneBundle {
+                scene: handle.clone(),
+                visibility: Visibility::Hidden,
+                ..default()
+            },
+            CandyTemplate,
+            Name::new(format!("CandyTemplate{}", i)),
+        ));
+    }
+}
+
+fn extract_candy_variants(
+    mut commands: Commands,
+    mut variants: ResMut<CandyMeshVariants>,
+    q_templates: Query<Entity, With<CandyTemplate>>,
+    q_children: Query<&Children>,
+    q_mesh_mats: Query<(&Handle<Mesh>, &Handle<StandardMaterial>)>,
+) {
+    if variants.ready {
+        return;
+    }
+    fn visit(
+        e: Entity,
+        q_children: &Query<&Children>,
+        q_mesh_mats: &Query<(&Handle<Mesh>, &Handle<StandardMaterial>)>,
+        out: &mut Vec<(Handle<Mesh>, Handle<StandardMaterial>)>,
+    ) {
+        if let Ok((m, mat)) = q_mesh_mats.get(e) {
+            out.push((m.clone(), mat.clone()));
+        }
+        if let Ok(children) = q_children.get(e) {
+            for &c in children.iter() {
+                visit(c, q_children, q_mesh_mats, out);
+            }
+        }
+    }
+    let mut collected = Vec::new();
+    for root in q_templates.iter() {
+        visit(root, &q_children, &q_mesh_mats, &mut collected);
+    }
+    if !collected.is_empty() {
+        collected.truncate(4); // keep a few variants
+        variants.variants = collected;
+        variants.ready = true;
+        for root in q_templates.iter() {
+            commands.entity(root).despawn_recursive();
+        }
+        info!("Particle instancing: extracted {} candy mesh variants", variants.variants.len());
+    }
+}
+
 impl Plugin for ParticlePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(AtmosDustConfig::default())
             .init_resource::<ParticleMaterials>()
             .init_resource::<CandyModels>()
+            .insert_resource(CandyMeshVariants::default())
             .add_event::<BallGroundImpactEvent>()
             .add_event::<TargetHitEvent>()
             .add_event::<GameOverEvent>()
             .add_event::<ShotFiredEvent>()
-            .add_systems(Startup, setup_atmospheric_dust)
+            .add_systems(Startup, (setup_atmospheric_dust, spawn_candy_templates))
             .add_systems(Update, (
+                extract_candy_variants.before(recycle_atmospheric_dust),
                 recycle_atmospheric_dust,
                 spawn_dust_on_impact,
                 spawn_shot_blast,
@@ -183,6 +249,7 @@ fn spawn_dust_on_impact(
     mut ev: EventReader<BallGroundImpactEvent>,
     mut commands: Commands,
     candy_models: Res<CandyModels>,
+    variants: Res<CandyMeshVariants>,
 ) {
     for e in ev.read() {
         if e.intensity < BOUNCE_EFFECT_INTENSITY_MIN { continue; }
@@ -205,31 +272,55 @@ fn spawn_dust_on_impact(
                 rng.gen_range(-2.2..2.2),
                 rng.gen_range(-2.2..2.2),
             );
-            commands.spawn((
-                SceneBundle {
-                    scene: random_candy(&mut rng, &candy_models.candy),
-                    transform: Transform::from_translation(e.pos + Vec3::Y * 0.03)
-                        .with_scale(Vec3::splat(scale))
-                        .with_rotation(Quat::from_euler(
-                            EulerRot::XYZ,
-                            rng.gen_range(0.0..std::f32::consts::TAU),
-                            rng.gen_range(0.0..std::f32::consts::TAU),
-                            rng.gen_range(0.0..std::f32::consts::TAU),
-                        )),
-                    ..default()
-                },
-                ParticleKind::DustBurst,
-                Particle {
-                    lifetime: 10.0,
-                    age: 0.0,
-                    fade: false,
-                    gravity: -9.8,
-                    vel: dir * speed,
-                    angular_vel: angular,
-                    start_scale: Vec3::splat(scale),
-                    end_scale: Vec3::splat(scale * 2.2), // larger growth than 1.8x but less than the old 3x
-                },
-            ));
+            let transform = Transform::from_translation(e.pos + Vec3::Y * 0.03)
+                .with_scale(Vec3::splat(scale))
+                .with_rotation(Quat::from_euler(
+                    EulerRot::XYZ,
+                    rng.gen_range(0.0..std::f32::consts::TAU),
+                    rng.gen_range(0.0..std::f32::consts::TAU),
+                    rng.gen_range(0.0..std::f32::consts::TAU),
+                ));
+            if variants.ready && !variants.variants.is_empty() {
+                let (mesh, material) = &variants.variants[rng.gen_range(0..variants.variants.len())];
+                commands.spawn((
+                    PbrBundle {
+                        mesh: mesh.clone(),
+                        material: material.clone(),
+                        transform,
+                        ..default()
+                    },
+                    ParticleKind::DustBurst,
+                    Particle {
+                        lifetime: 10.0,
+                        age: 0.0,
+                        fade: false,
+                        gravity: -9.8,
+                        vel: dir * speed,
+                        angular_vel: angular,
+                        start_scale: Vec3::splat(scale),
+                        end_scale: Vec3::splat(scale * 2.2),
+                    },
+                ));
+            } else {
+                commands.spawn((
+                    SceneBundle {
+                        scene: random_candy(&mut rng, &candy_models.candy),
+                        transform,
+                        ..default()
+                    },
+                    ParticleKind::DustBurst,
+                    Particle {
+                        lifetime: 10.0,
+                        age: 0.0,
+                        fade: false,
+                        gravity: -9.8,
+                        vel: dir * speed,
+                        angular_vel: angular,
+                        start_scale: Vec3::splat(scale),
+                        end_scale: Vec3::splat(scale * 2.2),
+                    },
+                ));
+            }
         }
     }
 }
@@ -238,6 +329,7 @@ fn spawn_shot_blast(
     mut ev: EventReader<ShotFiredEvent>,
     mut commands: Commands,
     candy_models: Res<CandyModels>,
+    variants: Res<CandyMeshVariants>,
 ) {
     for e in ev.read() {
         let mut rng = thread_rng();
@@ -263,35 +355,51 @@ fn spawn_shot_blast(
             // Speed scales with power; keep within a pleasing arc
             let speed = rng.gen_range(4.0..8.5) * (0.45 + 0.65 * e.power);
             let scale = rng.gen_range(0.16..0.30);
-            commands.spawn((
-                SceneBundle {
-                    scene: random_candy(&mut rng, &candy_models.candy),
-                    transform: Transform::from_translation(e.pos + Vec3::Y * 0.15)
-                        .with_scale(Vec3::splat(scale))
-                        .with_rotation(Quat::from_euler(
-                            EulerRot::XYZ,
-                            rng.gen_range(0.0..std::f32::consts::TAU),
-                            rng.gen_range(0.0..std::f32::consts::TAU),
-                            rng.gen_range(0.0..std::f32::consts::TAU),
-                        )),
-                    ..default()
-                },
-                ParticleKind::ShotBlast,
-                Particle {
-                    lifetime: rng.gen_range(0.45..0.85),
-                    age: 0.0,
-                    fade: false,
-                    gravity: -9.5,
-                    vel: dir * speed,
-                    angular_vel: Vec3::new(
-                        rng.gen_range(-5.0..5.0),
-                        rng.gen_range(-5.0..5.0),
-                        rng.gen_range(-5.0..5.0),
-                    ),
-                    start_scale: Vec3::splat(scale),
-                    end_scale: Vec3::splat(scale * rng.gen_range(1.0..1.4)),
-                },
-            ));
+            let transform = Transform::from_translation(e.pos + Vec3::Y * 0.15)
+                .with_scale(Vec3::splat(scale))
+                .with_rotation(Quat::from_euler(
+                    EulerRot::XYZ,
+                    rng.gen_range(0.0..std::f32::consts::TAU),
+                    rng.gen_range(0.0..std::f32::consts::TAU),
+                    rng.gen_range(0.0..std::f32::consts::TAU),
+                ));
+            let particle = Particle {
+                lifetime: rng.gen_range(0.45..0.85),
+                age: 0.0,
+                fade: false,
+                gravity: -9.5,
+                vel: dir * speed,
+                angular_vel: Vec3::new(
+                    rng.gen_range(-5.0..5.0),
+                    rng.gen_range(-5.0..5.0),
+                    rng.gen_range(-5.0..5.0),
+                ),
+                start_scale: Vec3::splat(scale),
+                end_scale: Vec3::splat(scale * rng.gen_range(1.0..1.4)),
+            };
+            if variants.ready && !variants.variants.is_empty() {
+                let (mesh, material) = &variants.variants[rng.gen_range(0..variants.variants.len())];
+                commands.spawn((
+                    PbrBundle {
+                        mesh: mesh.clone(),
+                        material: material.clone(),
+                        transform,
+                        ..default()
+                    },
+                    ParticleKind::ShotBlast,
+                    particle,
+                ));
+            } else {
+                commands.spawn((
+                    SceneBundle {
+                        scene: random_candy(&mut rng, &candy_models.candy),
+                        transform,
+                        ..default()
+                    },
+                    ParticleKind::ShotBlast,
+                    particle,
+                ));
+            }
         }
     }
 }
@@ -301,6 +409,7 @@ fn spawn_explosion_on_hit(
     mut ev: EventReader<TargetHitEvent>,
     mut commands: Commands,
     candy_models: Res<CandyModels>,
+    variants: Res<CandyMeshVariants>,
 ) {
     for e in ev.read() {
         let mut rng = thread_rng();
@@ -316,35 +425,51 @@ fn spawn_explosion_on_hit(
             };
             let speed = rng.gen_range(5.0..14.0);
             let scale = rng.gen_range(0.20..0.40);
-            commands.spawn((
-                SceneBundle {
-                    scene: random_candy(&mut rng, &candy_models.candy),
-                    transform: Transform::from_translation(e.pos)
-                        .with_scale(Vec3::splat(scale))
-                        .with_rotation(Quat::from_euler(
-                            EulerRot::XYZ,
-                            rng.gen_range(0.0..std::f32::consts::TAU),
-                            rng.gen_range(0.0..std::f32::consts::TAU),
-                            rng.gen_range(0.0..std::f32::consts::TAU),
-                        )),
-                    ..default()
-                },
-                ParticleKind::Explosion,
-                Particle {
-                    lifetime: rng.gen_range(0.5..1.0),
-                    age: 0.0,
-                    fade: false,
-                    gravity: -9.0,
-                    vel: dir * speed,
-                    angular_vel: Vec3::new(
-                        rng.gen_range(-6.0..6.0),
-                        rng.gen_range(-6.0..6.0),
-                        rng.gen_range(-6.0..6.0),
-                    ),
-                    start_scale: Vec3::splat(scale),
-                    end_scale: Vec3::splat(scale),
-                },
-            ));
+            let transform = Transform::from_translation(e.pos)
+                .with_scale(Vec3::splat(scale))
+                .with_rotation(Quat::from_euler(
+                    EulerRot::XYZ,
+                    rng.gen_range(0.0..std::f32::consts::TAU),
+                    rng.gen_range(0.0..std::f32::consts::TAU),
+                    rng.gen_range(0.0..std::f32::consts::TAU),
+                ));
+            let particle = Particle {
+                lifetime: rng.gen_range(0.5..1.0),
+                age: 0.0,
+                fade: false,
+                gravity: -9.0,
+                vel: dir * speed,
+                angular_vel: Vec3::new(
+                    rng.gen_range(-6.0..6.0),
+                    rng.gen_range(-6.0..6.0),
+                    rng.gen_range(-6.0..6.0),
+                ),
+                start_scale: Vec3::splat(scale),
+                end_scale: Vec3::splat(scale),
+            };
+            if variants.ready && !variants.variants.is_empty() {
+                let (mesh, material) = &variants.variants[rng.gen_range(0..variants.variants.len())];
+                commands.spawn((
+                    PbrBundle {
+                        mesh: mesh.clone(),
+                        material: material.clone(),
+                        transform,
+                        ..default()
+                    },
+                    ParticleKind::Explosion,
+                    particle,
+                ));
+            } else {
+                commands.spawn((
+                    SceneBundle {
+                        scene: random_candy(&mut rng, &candy_models.candy),
+                        transform,
+                        ..default()
+                    },
+                    ParticleKind::Explosion,
+                    particle,
+                ));
+            }
         }
     }
 }
@@ -354,6 +479,7 @@ fn spawn_confetti_on_game_over(
     mut ev: EventReader<GameOverEvent>,
     mut commands: Commands,
     candy_models: Res<CandyModels>,
+    variants: Res<CandyMeshVariants>,
 ) {
     for e in ev.read() {
         let mut rng = thread_rng();
@@ -370,35 +496,51 @@ fn spawn_confetti_on_game_over(
                 rng.gen_range(-2.5..2.5),
             );
             let scale = rng.gen_range(0.12..0.22);
-            commands.spawn((
-                SceneBundle {
-                    scene: random_candy(&mut rng, &candy_models.candy),
-                    transform: Transform::from_translation(pos)
-                        .with_scale(Vec3::splat(scale))
-                        .with_rotation(Quat::from_euler(
-                            EulerRot::XYZ,
-                            rng.gen_range(0.0..std::f32::consts::TAU),
-                            rng.gen_range(0.0..std::f32::consts::TAU),
-                            rng.gen_range(0.0..std::f32::consts::TAU),
-                        )),
-                    ..default()
-                },
-                ParticleKind::Confetti,
-                Particle {
-                    lifetime: rng.gen_range(3.5..6.0),
-                    age: 0.0,
-                    fade: false,
-                    gravity: -6.0,
-                    vel,
-                    angular_vel: Vec3::new(
-                        rng.gen_range(-3.0..3.0),
-                        rng.gen_range(-3.0..3.0),
-                        rng.gen_range(-3.0..3.0),
-                    ),
-                    start_scale: Vec3::splat(scale),
-                    end_scale: Vec3::splat(scale),
-                },
-            ));
+            let transform = Transform::from_translation(pos)
+                .with_scale(Vec3::splat(scale))
+                .with_rotation(Quat::from_euler(
+                    EulerRot::XYZ,
+                    rng.gen_range(0.0..std::f32::consts::TAU),
+                    rng.gen_range(0.0..std::f32::consts::TAU),
+                    rng.gen_range(0.0..std::f32::consts::TAU),
+                ));
+            let particle = Particle {
+                lifetime: rng.gen_range(3.5..6.0),
+                age: 0.0,
+                fade: false,
+                gravity: -6.0,
+                vel,
+                angular_vel: Vec3::new(
+                    rng.gen_range(-3.0..3.0),
+                    rng.gen_range(-3.0..3.0),
+                    rng.gen_range(-3.0..3.0),
+                ),
+                start_scale: Vec3::splat(scale),
+                end_scale: Vec3::splat(scale),
+            };
+            if variants.ready && !variants.variants.is_empty() {
+                let (mesh, material) = &variants.variants[rng.gen_range(0..variants.variants.len())];
+                commands.spawn((
+                    PbrBundle {
+                        mesh: mesh.clone(),
+                        material: material.clone(),
+                        transform,
+                        ..default()
+                    },
+                    ParticleKind::Confetti,
+                    particle,
+                ));
+            } else {
+                commands.spawn((
+                    SceneBundle {
+                        scene: random_candy(&mut rng, &candy_models.candy),
+                        transform,
+                        ..default()
+                    },
+                    ParticleKind::Confetti,
+                    particle,
+                ));
+            }
         }
     }
 }
