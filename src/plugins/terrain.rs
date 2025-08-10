@@ -195,8 +195,33 @@ impl Plugin for TerrainPlugin {
             .insert_resource(InProgressChunks::default())
             .add_systems(
                 Update,
-                (update_terrain_chunks, finalize_chunk_tasks.after(update_terrain_chunks)),
+                (
+                    update_terrain_chunks,
+                    finalize_chunk_tasks.after(update_terrain_chunks),
+                    apply_terrain_config_changes.after(finalize_chunk_tasks),
+                ),
             );
+    }
+}
+
+fn apply_terrain_config_changes(
+    mut commands: Commands,
+    cfg: Res<TerrainConfig>,
+    sampler: Res<TerrainSampler>,
+    mut loaded: ResMut<LoadedChunks>,
+    q_chunks: Query<Entity, With<TerrainChunk>>,
+) {
+    if !cfg.is_changed() {
+        return;
+    }
+    // Rebuild terrain sampler & clear existing chunks if impactful params changed.
+    if cfg.amplitude != sampler.cfg.amplitude || cfg.view_radius_chunks != sampler.cfg.view_radius_chunks {
+        for e in q_chunks.iter() {
+            commands.entity(e).despawn_recursive();
+        }
+        loaded.map.clear();
+        commands.insert_resource(TerrainSampler::new(cfg.as_ref().clone()));
+        info!("Terrain config changed: amplitude/view_radius -> clearing & regenerating terrain");
     }
 }
 

@@ -18,6 +18,7 @@ pub mod plugins {
     pub mod terrain_graph;
     pub mod vegetation;
     pub mod main_menu;
+    pub mod performance_menu;
 }
 pub mod screenshot;
 pub mod prelude;

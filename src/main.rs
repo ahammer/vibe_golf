@@ -21,6 +21,7 @@ use vibe_golf::plugins::{
     game_audio::GameAudioPlugin,
     contour_material::ContourMaterialPlugin,
     main_menu::MainMenuPlugin,
+    performance_menu::PerformanceMenuPlugin,
 };
 
 use vibe_golf::screenshot::{ScreenshotPlugin, ScreenshotConfig};
@@ -72,6 +73,7 @@ fn main() {
         .add_plugins(HudPlugin)             // HUD (score/time)
         .add_plugins(CameraPlugin)          // camera follow/orbit
         .add_plugins(ScreenshotPlugin)      // screenshot capture
+        .add_plugins(PerformanceMenuPlugin) // realtime performance menu (gear icon)
         .add_plugins(FrameTimeDiagnosticsPlugin)
         .add_plugins(LogDiagnosticsPlugin::default())
         .run();

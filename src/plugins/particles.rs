@@ -53,12 +53,12 @@ struct Particle {
 }
 
 #[derive(Resource)]
-struct AtmosDustConfig {
-    count: usize,
-    half_extent: f32,
-    min_y: f32,
-    max_y: f32,
-    rise_speed: f32,
+pub struct AtmosDustConfig {
+    pub count: usize,
+    pub half_extent: f32,
+    pub min_y: f32,
+    pub max_y: f32,
+    pub rise_speed: f32,
 }
 impl Default for AtmosDustConfig {
     fn default() -> Self {
