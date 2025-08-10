@@ -1,22 +1,25 @@
 // Procedural vegetation spawning & runtime management.
 // Aggressive optimizations applied:
 //  - Early rejection before expensive surface sampling
-//  - Batched progressive spawning over multiple frames (avoids startup hitch)
-//  - Config as resource (tunable at runtime / dev console friendly)
-//  - Preloaded scene handles (no per-entity string formatting)
-//  - Spawn batching using spawn_batch
+//  - Progressive streaming spawn (frame‑budgeted)
+//  - Config resources (runtime tunable)
+//  - Preloaded scene handles (no per-instance path formatting)
+//  - Batched entity creation (spawn_batch)
 //  - Distance culling with hysteresis + timed passes
-//  - Optional hard cap enforcement + overshoot trimming
+//  - Shadow LOD: disable shadows for distant trees (no quality loss near player)
+//  - Adaptive update timers (independent for culling & shadow LOD)
 //
-// Further future work (not yet implemented):
-//  - Real mesh/instance batching (extract meshes, use Single mesh + GPU instancing)
-//  - Per-distance LOD (swap to simplified model or billboard)
-//  - Streaming / unloading outside terrain chunk
-//  - Editor tooling to visualize spawn masks
+// Future potential (not yet):
+//  - Real GPU instancing with extracted meshes
+//  - Billboard / impostor far LOD
+//  - Streaming unload + spatial partition
+//  - Parallel sampling via task pool
 //
 // NOTE: For determinism you could replace thread_rng with a seeded RNG from cfg.seed.
 
 use bevy::prelude::*;
+use bevy::pbr::NotShadowCaster;
+use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use noise::{NoiseFn, Perlin};
 use rand::{thread_rng, Rng};
 use crate::plugins::terrain::TerrainSampler;
@@ -26,14 +29,21 @@ pub struct VegetationPlugin;
 impl Plugin for VegetationPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(VegetationConfig::default())
-            .add_systems(Startup, prepare_vegetation)
             .insert_resource(VegetationCullingConfig::default())
+            .insert_resource(VegetationLodConfig::default())
+            .insert_resource(VegetationPerfTuner::default())
+            .add_systems(Startup, prepare_vegetation)
             .insert_resource(VegetationCullingState {
                 timer: Timer::from_seconds(VegetationCullingConfig::default().update_interval, TimerMode::Repeating),
+            })
+            .insert_resource(VegetationLodState {
+                timer: Timer::from_seconds(VegetationLodConfig::default().update_interval, TimerMode::Repeating),
             })
             .add_systems(Update, (
                 progressive_spawn_trees,
                 cull_trees.after(progressive_spawn_trees),
+                tree_lod_update.after(cull_trees),
+                vegetation_perf_tuner.after(tree_lod_update),
             ));
     }
 }
@@ -42,6 +52,11 @@ impl Plugin for VegetationPlugin {
 pub struct Tree;
 #[derive(Component)]
 struct TreeCulled(bool); // true if currently hidden
+
+#[derive(Component)]
+struct TreeLod {
+    shadows_on: bool,
+}
 
 // ---------------- Configuration Resources ----------------
 
@@ -55,8 +70,8 @@ pub struct VegetationConfig {
     pub min_slope_normal_y: f32,
     pub scale_min: f32,
     pub scale_max: f32,
-    pub samples_per_frame: usize, // how many grid cells evaluated per frame during spawn
-    pub batch_spawn_flush: usize, // flush batch when this many queued
+    pub samples_per_frame: usize, // grid cells evaluated per frame
+    pub batch_spawn_flush: usize, // flush batch when queued >= this
 }
 impl Default for VegetationConfig {
     fn default() -> Self {
@@ -69,7 +84,7 @@ impl Default for VegetationConfig {
             min_slope_normal_y: 0.70,
             scale_min: 5.0,
             scale_max: 10.0,
-            samples_per_frame: 650,     // tuned: ~1–2ms typical (adjust as needed)
+            samples_per_frame: 650,
             batch_spawn_flush: 256,
         }
     }
@@ -78,14 +93,14 @@ impl Default for VegetationConfig {
 // Distance culling configuration
 #[derive(Resource)]
 pub struct VegetationCullingConfig {
-    pub max_distance: f32,    // soft visibility radius for trees
+    pub max_distance: f32,    // soft visibility radius
     pub hysteresis: f32,      // +/- band to avoid popping
-    pub update_interval: f32, // seconds between culling passes
+    pub update_interval: f32, // seconds between passes
 }
 impl Default for VegetationCullingConfig {
     fn default() -> Self {
         Self {
-            max_distance: 160.0, // slightly tighter for more aggressive perf
+            max_distance: 160.0,
             hysteresis: 14.0,
             update_interval: 0.33,
         }
@@ -95,6 +110,69 @@ impl Default for VegetationCullingConfig {
 #[derive(Resource)]
 struct VegetationCullingState {
     timer: Timer,
+}
+
+// Shadow LOD config (keeps visual quality near player; disables distant shadow casters)
+#[derive(Resource)]
+pub struct VegetationLodConfig {
+    pub shadows_full_on: f32,     // within this distance: always shadowed
+    pub shadows_full_off: f32,    // beyond this distance: shadows disabled
+    pub hysteresis: f32,          // distance band to prevent flicker
+    pub update_interval: f32,     // seconds between checks
+}
+impl Default for VegetationLodConfig {
+    fn default() -> Self {
+        Self {
+            shadows_full_on: 110.0,
+            shadows_full_off: 135.0,
+            hysteresis: 6.0,
+            update_interval: 0.25,
+        }
+    }
+}
+
+#[derive(Resource)]
+struct VegetationLodState {
+    timer: Timer,
+}
+
+// Adaptive performance tuner – dynamically adjusts vegetation-related distances to approach target FPS.
+#[derive(Resource)]
+struct VegetationPerfTuner {
+    timer: Timer,
+    target_fps: f32,
+    low_band: f32,
+    high_band: f32,
+    default_cull: f32,
+    default_shadow_on: f32,
+    default_shadow_off: f32,
+    min_cull: f32,
+    max_cull: f32,
+    min_shadow_on: f32,
+    max_shadow_on: f32,
+    min_shadow_off: f32,
+    max_shadow_off: f32,
+    adjust_step: f32,
+}
+impl Default for VegetationPerfTuner {
+    fn default() -> Self {
+        Self {
+            timer: Timer::from_seconds(0.6, TimerMode::Repeating),
+            target_fps: 120.0,
+            low_band: 0.92,   // tighten below ~110 FPS
+            high_band: 1.05,  // relax above ~126 FPS
+            default_cull: 160.0,
+            default_shadow_on: 110.0,
+            default_shadow_off: 135.0,
+            min_cull: 110.0,
+            max_cull: 220.0,
+            min_shadow_on: 60.0,
+            max_shadow_on: 140.0,
+            min_shadow_off: 80.0,
+            max_shadow_off: 190.0,
+            adjust_step: 5.0,
+        }
+    }
 }
 
 // Preloaded assets & shared noise
@@ -115,6 +193,7 @@ struct VegetationSpawnState {
     early_noise_rejects: usize,
     slope_rejects: usize,
     finished: bool,
+    batch: Vec<(SceneBundle, (Tree, TreeCulled, TreeLod))>, // reusable batch buffer
 }
 
 // Data structure passed through functional stages
@@ -134,8 +213,8 @@ struct Candidate {
 fn generate_grid_points(half: f32, cell: f32) -> Vec<Vec2> {
     let steps = ((half * 2.0) / cell).ceil() as i32;
     let mut pts = Vec::with_capacity((steps * steps) as usize);
-    for j in -steps/2 ..= steps/2 {
-        for i in -steps/2 ..= steps/2 {
+    for j in -steps / 2..=steps / 2 {
+        for i in -steps / 2..=steps / 2 {
             pts.push(Vec2::new(i as f32 * cell, j as f32 * cell));
         }
     }
@@ -155,16 +234,24 @@ fn sample_surface(sampler: &TerrainSampler, p: Vec2) -> (f32, Vec3) {
 }
 
 fn slope_mask(normal: Vec3, min_slope_normal_y: f32) -> f32 {
-    if normal.y < min_slope_normal_y { 0.0 } else { normal.y.clamp(0.6, 1.0) }
+    if normal.y < min_slope_normal_y {
+        0.0
+    } else {
+        normal.y.clamp(0.6, 1.0)
+    }
 }
 
 fn radial_mask(p: Vec2, play_radius: f32) -> f32 {
     let clear_r = play_radius * 0.20;
     let fade_r = play_radius * 0.65;
     let r = p.length();
-    if r <= clear_r { 0.0 }
-    else if r >= fade_r { 1.0 }
-    else { ((r - clear_r) / (fade_r - clear_r)).clamp(0.0, 1.0) }
+    if r <= clear_r {
+        0.0
+    } else if r >= fade_r {
+        1.0
+    } else {
+        ((r - clear_r) / (fade_r - clear_r)).clamp(0.0, 1.0)
+    }
 }
 
 fn noise_density(perlin: &Perlin, p: Vec2, noise_freq: f64) -> f32 {
@@ -196,7 +283,11 @@ fn build_transform(p: &Candidate, rng: &mut impl Rng, cfg: &VegetationConfig) ->
 }
 
 fn random_tree_handle(rng: &mut impl Rng, a: &Handle<Scene>, b: &Handle<Scene>) -> Handle<Scene> {
-    if rng.gen_bool(0.5) { a.clone() } else { b.clone() }
+    if rng.gen_bool(0.5) {
+        a.clone()
+    } else {
+        b.clone()
+    }
 }
 
 // ---------------- Systems ----------------
@@ -221,6 +312,7 @@ fn prepare_vegetation(
         early_noise_rejects: 0,
         slope_rejects: 0,
         finished: false,
+        batch: Vec::with_capacity(cfg.batch_spawn_flush),
     });
 }
 
@@ -231,10 +323,11 @@ fn progressive_spawn_trees(
     assets: Res<VegetationAssets>,
     cfg: Res<VegetationConfig>,
 ) {
-    if state.finished { return; }
+    if state.finished {
+        return;
+    }
 
     let mut rng = thread_rng();
-    let mut batch: Vec<(SceneBundle, Tree, TreeCulled)> = Vec::with_capacity(cfg.batch_spawn_flush);
 
     let total_points = state.points.len();
     let end = (state.cursor + cfg.samples_per_frame).min(total_points);
@@ -282,28 +375,37 @@ fn progressive_spawn_trees(
         if decide_spawn(candidate.density, cfg.threshold) {
             let handle = random_tree_handle(&mut rng, &assets.tree1, &assets.tree2);
             let transform = build_transform(&candidate, &mut rng, &cfg);
-            batch.push((
+            state.batch.push((
                 SceneBundle {
                     scene: handle,
                     transform,
                     ..default()
                 },
-                Tree,
-                TreeCulled(false),
+                (Tree, TreeCulled(false), TreeLod { shadows_on: true }),
             ));
             state.spawned += 1;
         }
 
-        if batch.len() >= cfg.batch_spawn_flush {
-            let drained = std::mem::take(&mut batch);
-            commands.spawn_batch(drained);
+        if state.batch.len() >= cfg.batch_spawn_flush {
+            let drained = std::mem::take(&mut state.batch);
+            // Flatten tuple structure for spawn_batch
+            commands.spawn_batch(drained.into_iter().map(|(bundle, comps)| {
+                (
+                    bundle,
+                    comps.0, // Tree
+                    comps.1, // TreeCulled
+                    comps.2, // TreeLod
+                )
+            }));
         }
     }
 
     // Flush remainder
-    if !batch.is_empty() {
-        let drained = std::mem::take(&mut batch);
-        commands.spawn_batch(drained);
+    if !state.batch.is_empty() {
+        let drained = std::mem::take(&mut state.batch);
+        commands.spawn_batch(drained.into_iter().map(|(bundle, comps)| {
+            (bundle, comps.0, comps.1, comps.2)
+        }));
     }
 
     // Finished condition
@@ -345,5 +447,120 @@ fn cull_trees(
             *vis = Visibility::Inherited;
             culled.0 = false;
         }
+    }
+}
+
+fn tree_lod_update(
+    time: Res<Time>,
+    cfg: Res<VegetationLodConfig>,
+    mut state: ResMut<VegetationLodState>,
+    q_ball: Query<&Transform, With<Ball>>,
+    mut q_trees: Query<(Entity, &Transform, &mut TreeLod, Option<&NotShadowCaster>), With<Tree>>,
+    mut commands: Commands,
+) {
+    if !state.timer.tick(time.delta()).just_finished() {
+        return;
+    }
+    let Ok(ball_t) = q_ball.get_single() else { return; };
+    let origin = ball_t.translation;
+
+    let on_d2 = cfg.shadows_full_on * cfg.shadows_full_on;
+    let off_d2 = cfg.shadows_full_off * cfg.shadows_full_off;
+    let hysteresis = cfg.hysteresis;
+
+    // Outer thresholds with hysteresis
+    let enable_threshold = (cfg.shadows_full_on + hysteresis).powi(2);
+    let disable_threshold = (cfg.shadows_full_off - hysteresis).powi(2);
+
+    for (e, t, mut lod, shadow_flag) in &mut q_trees {
+        let d2 = (t.translation - origin).length_squared();
+        // If currently with shadows
+        if lod.shadows_on {
+            // Past disable range -> turn off
+            if d2 > disable_threshold {
+                lod.shadows_on = false;
+                if shadow_flag.is_none() {
+                    commands.entity(e).insert(NotShadowCaster);
+                }
+            }
+        } else {
+            // Return to shadowed if well within enable range
+            if d2 < enable_threshold {
+                lod.shadows_on = true;
+                if shadow_flag.is_some() {
+                    commands.entity(e).remove::<NotShadowCaster>();
+                }
+            }
+        }
+        // Hard cut: outside extreme off distance always remove shadows
+        if d2 > off_d2 && shadow_flag.is_none() {
+            commands.entity(e).insert(NotShadowCaster);
+            lod.shadows_on = false;
+        }
+        // Inside sure-on distance always ensure shadows (overrides above)
+        if d2 < on_d2 && shadow_flag.is_some() {
+            commands.entity(e).remove::<NotShadowCaster>();
+            lod.shadows_on = true;
+        }
+    }
+}
+
+fn vegetation_perf_tuner(
+    time: Res<Time>,
+    diagnostics: Res<DiagnosticsStore>,
+    mut tuner: ResMut<VegetationPerfTuner>,
+    mut cull_cfg: ResMut<VegetationCullingConfig>,
+    mut lod_cfg: ResMut<VegetationLodConfig>,
+) {
+    if !tuner.timer.tick(time.delta()).just_finished() {
+        return;
+    }
+
+    // Pull smoothed FPS
+    let Some(fps_diag) = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS) else { return; };
+    let Some(fps) = fps_diag.smoothed() else { return; };
+    let fps = fps as f32; // convert f64 -> f32 for config comparison
+
+    let ratio = fps / tuner.target_fps;
+    // Decide direction
+    if ratio < tuner.low_band {
+        // Tighten: reduce cull distance & shadow ranges
+        if cull_cfg.max_distance > tuner.min_cull {
+            cull_cfg.max_distance = (cull_cfg.max_distance - tuner.adjust_step).max(tuner.min_cull);
+        }
+        if lod_cfg.shadows_full_on > tuner.min_shadow_on {
+            lod_cfg.shadows_full_on = (lod_cfg.shadows_full_on - tuner.adjust_step * 0.5).max(tuner.min_shadow_on);
+        }
+        if lod_cfg.shadows_full_off > tuner.min_shadow_off {
+            lod_cfg.shadows_full_off = (lod_cfg.shadows_full_off - tuner.adjust_step).max(tuner.min_shadow_off);
+        }
+    } else if ratio > tuner.high_band {
+        // Relax toward defaults (not past maxima)
+        if cull_cfg.max_distance < tuner.default_cull {
+            cull_cfg.max_distance = (cull_cfg.max_distance + tuner.adjust_step).min(tuner.default_cull.min(tuner.max_cull));
+        }
+        if lod_cfg.shadows_full_on < tuner.default_shadow_on {
+            lod_cfg.shadows_full_on = (lod_cfg.shadows_full_on + tuner.adjust_step * 0.5).min(tuner.default_shadow_on.min(tuner.max_shadow_on));
+        }
+        if lod_cfg.shadows_full_off < tuner.default_shadow_off {
+            lod_cfg.shadows_full_off = (lod_cfg.shadows_full_off + tuner.adjust_step).min(tuner.default_shadow_off.min(tuner.max_shadow_off));
+        }
+    } else {
+        // In band: gentle drift back toward defaults
+        if (cull_cfg.max_distance - tuner.default_cull).abs() > 1.0 {
+            if cull_cfg.max_distance < tuner.default_cull {
+                cull_cfg.max_distance = (cull_cfg.max_distance + tuner.adjust_step * 0.5).min(tuner.default_cull);
+            } else {
+                cull_cfg.max_distance = (cull_cfg.max_distance - tuner.adjust_step * 0.5).max(tuner.default_cull);
+            }
+        }
+    }
+
+    // Maintain ordering constraints & minimum separation
+    if lod_cfg.shadows_full_on + 5.0 > lod_cfg.shadows_full_off {
+        lod_cfg.shadows_full_off = lod_cfg.shadows_full_on + 5.0;
+    }
+    if cull_cfg.max_distance < lod_cfg.shadows_full_off + 10.0 {
+        cull_cfg.max_distance = lod_cfg.shadows_full_off + 10.0;
     }
 }
