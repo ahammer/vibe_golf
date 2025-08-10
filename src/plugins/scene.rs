@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::math::primitives::{Cuboid, Sphere};
+use bevy::prelude::AlphaMode;
 use crate::plugins::terrain::TerrainSampler;
 use rand::prelude::*;
 use crate::plugins::camera::OrbitCamera;
@@ -51,6 +52,12 @@ pub struct ShotIndicator;
 #[derive(Component)]
 pub struct ShotIndicatorDot {
     pub index: usize,
+}
+
+#[derive(Component)]
+pub struct Wall {
+    pub normal: Vec3,
+    pub plane_d: f32, // n·p = plane_d
 }
 
 // Trajectory visualization parameters
@@ -150,6 +157,10 @@ const TARGET_BOB_AMPLITUDE: f32 = 10.0;    // vertical amplitude
 const TARGET_BOB_FREQ: f32 = 0.5;          // Hz
 const TARGET_ROT_SPEED: f32 = 0.4;         // radians/sec
 const TARGET_COLLIDER_RADIUS: f32 = 3.0;   // generous spherical collider radius
+const WORLD_HALF_EXTENT: f32 = 384.0 * 0.5 - 5.0;
+const WALL_HEIGHT: f32 = 120.0;
+const WALL_FADE_DISTANCE: f32 = 60.0;
+const WALL_RESTITUTION: f32 = 0.6;
 
 // Generate an inside-facing (inverted) UV sphere suitable for equirectangular sky textures.
 fn generate_inverted_sphere(longitudes: u32, latitudes: u32, radius: f32) -> Mesh {
@@ -209,6 +220,7 @@ impl Plugin for ScenePlugin {
                 update_power_gauge,
                 update_power_bar,
                 update_target_motion,
+                update_wall_fade,
                 reset_game
             ));
     }
@@ -327,6 +339,47 @@ fn setup_scene(
                 bounce_freq: TARGET_BOB_FREQ,
             },
         ));
+
+    // Spawn boundary walls (fade in when ball is near).
+    let wall_material = mats.add(StandardMaterial {
+        base_color: Color::srgba(0.2, 0.5, 0.9, 0.0),
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        ..default()
+    });
+
+    let half = WORLD_HALF_EXTENT;
+    let height = WALL_HEIGHT;
+    let thickness = 1.0;
+
+    // X walls (at +/- X, extending along Z)
+    for &sign in &[-1.0f32, 1.0] {
+        commands.spawn((
+            PbrBundle {
+                mesh: meshes.add(Mesh::from(Cuboid {
+                    half_size: Vec3::new(thickness * 0.5, height * 0.5, half),
+                })),
+                material: wall_material.clone(),
+                transform: Transform::from_xyz(sign * half, height * 0.5, 0.0),
+                ..default()
+            },
+            Wall { normal: Vec3::new(sign, 0.0, 0.0), plane_d: sign * half },
+        ));
+    }
+    // Z walls (at +/- Z, extending along X)
+    for &sign in &[-1.0f32, 1.0] {
+        commands.spawn((
+            PbrBundle {
+                mesh: meshes.add(Mesh::from(Cuboid {
+                    half_size: Vec3::new(half, height * 0.5, thickness * 0.5),
+                })),
+                material: wall_material.clone(),
+                transform: Transform::from_xyz(0.0, height * 0.5, sign * half),
+                ..default()
+            },
+            Wall { normal: Vec3::new(0.0, 0.0, sign), plane_d: sign * half },
+        ));
+    }
 }
 
 fn simple_ball_physics(
@@ -340,6 +393,25 @@ fn simple_ball_physics(
 
     kin.vel.y += g * dt;
     t.translation += kin.vel * dt;
+
+    // World boundary bounce
+    {
+        let limit = WORLD_HALF_EXTENT - kin.collider_radius;
+        if t.translation.x.abs() > limit {
+            let sign = t.translation.x.signum();
+            t.translation.x = sign * limit;
+            if kin.vel.x * sign > 0.0 {
+                kin.vel.x = -kin.vel.x * WALL_RESTITUTION;
+            }
+        }
+        if t.translation.z.abs() > limit {
+            let sign = t.translation.z.signum();
+            t.translation.z = sign * limit;
+            if kin.vel.z * sign > 0.0 {
+                kin.vel.z = -kin.vel.z * WALL_RESTITUTION;
+            }
+        }
+    }
 
     let h = sampler.height(t.translation.x, t.translation.z);
     let surface_y = h + kin.collider_radius;
@@ -698,6 +770,22 @@ fn update_target_motion(
         let y = f.ground + f.base_height + f.amplitude * f.phase.sin();
         t.translation.y = y;
         t.rotate_local(Quat::from_rotation_y(f.rot_speed * dt));
+    }
+}
+
+fn update_wall_fade(
+    q_ball: Query<&Transform, With<Ball>>,
+    mut q_walls: Query<(&Wall, &Handle<StandardMaterial>)>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let Ok(ball_t) = q_ball.get_single() else { return; };
+    let pos = ball_t.translation;
+    for (wall, mat_handle) in &mut q_walls {
+        if let Some(mat) = materials.get_mut(mat_handle) {
+            let dist = (wall.normal.dot(pos) - wall.plane_d).abs();
+            let alpha = (1.0 - (dist / WALL_FADE_DISTANCE)).clamp(0.0, 1.0);
+            mat.base_color = Color::srgba(0.2, 0.5, 0.9, alpha);
+        }
     }
 }
 
