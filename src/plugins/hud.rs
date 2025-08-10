@@ -19,8 +19,6 @@ pub struct CompassRoot;
 #[derive(Component)]
 pub struct CompassTargetMarker;
 #[derive(Component)]
-pub struct CompassForwardMarker;
-#[derive(Component)]
 pub struct CompassDistanceText;
 
 pub struct HudPlugin;
@@ -134,8 +132,7 @@ fn spawn_compass_graphics(
 
     let circle_mesh = meshes.add(build_circle_mesh(radius, 64));
     let circle_mat = materials.add(Color::srgba(1.0, 1.0, 1.0, 0.07));
-    let line_mesh = meshes.add(build_rect_mesh(4.0, radius * 0.9));
-    let line_mat = materials.add(Color::srgba(1.0, 1.0, 1.0, 0.35));
+    // removed forward line (not needed)
     let target_mesh = meshes.add(build_circle_mesh(6.0, 24));
     let target_mat = materials.add(Color::srgb(0.95, 0.2, 0.2));
 
@@ -158,16 +155,6 @@ fn spawn_compass_graphics(
                 transform: Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
                 ..default()
             },
-        ));
-        // Forward marker (vertical line pointing "up"/forward)
-        p.spawn((
-            MaterialMesh2dBundle {
-                mesh: line_mesh.clone().into(),
-                material: line_mat.clone(),
-                transform: Transform::from_translation(Vec3::new(0.0, radius * 0.05, 0.5)),
-                ..default()
-            },
-            CompassForwardMarker,
         ));
         // Target marker (will be positioned each frame)
         p.spawn((

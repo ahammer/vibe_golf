@@ -190,6 +190,7 @@ fn spawn_level(
         bob_freq: level.target.float.bob_freq,
         rot_speed: level.target.float.rot_speed,
         collider_radius: level.target.float.collider_radius,
+        visual_offset: 3.6, // increased (200% more) lift to keep model clearly above ground
     });
     commands.spawn((
         SceneBundle {

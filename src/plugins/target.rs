@@ -30,6 +30,7 @@ pub struct TargetParams {
     pub bob_freq: f32,
     pub rot_speed: f32,
     pub collider_radius: f32,
+    pub visual_offset: f32, // constant vertical lift to account for model pivot (added)
 }
 
 pub struct TargetPlugin;
@@ -90,25 +91,24 @@ pub fn detect_target_hits(
         return;
     }
 
-    // Reposition target (simple spiral / ring pattern similar to previous logic)
-    // Use level world bounds if available.
-    let half = level.as_ref().map(|l| l.world.half_extent).unwrap_or(187.0);
+    // Reposition target:
+    // Choose a random direction and distance (500..800) from the LAST target position.
     let mut rng = rand::thread_rng();
     float.phase = rng.gen_range(0.0..std::f32::consts::TAU);
 
-    let angle_deg = (score.hits as f32 * 137.0) % 360.0;
-    let angle = angle_deg.to_radians();
-    let ring = 60.0 + (score.hits % 5) as f32 * 15.0;
-    let mut new_x = ring * angle.cos();
-    let mut new_z = ring * angle.sin();
-    new_x = new_x.clamp(-half, half);
-    new_z = new_z.clamp(-half, half);
+    let dist = rng.gen_range(500.0..800.0);
+    let angle = rng.gen_range(0.0..std::f32::consts::TAU);
+    let base_x = target_t.translation.x;
+    let base_z = target_t.translation.z;
+    let new_x = base_x + dist * angle.cos();
+    let new_z = base_z + dist * angle.sin();
+
     let ground = sampler.height(new_x, new_z);
     float.ground = ground;
-    float.base_height = params.base_height;
+    float.base_height = params.base_height + params.visual_offset;
     float.amplitude = params.amplitude;
     float.bounce_freq = params.bob_freq;
     float.rot_speed = params.rot_speed;
 
-    target_t.translation = Vec3::new(new_x, ground + params.base_height, new_z);
+    target_t.translation = Vec3::new(new_x, ground + params.base_height + params.visual_offset, new_z);
 }
