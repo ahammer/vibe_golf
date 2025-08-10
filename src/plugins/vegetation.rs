@@ -1,14 +1,15 @@
 // Procedural vegetation spawning & runtime management.
-// Optimizations & cleanup applied:
-//  - Region weight + spacing logic refactored into helpers
-//  - Spatial hash (uniform grid) for blue‑noise spacing (replaces O(n) scan)
-//  - Reduced repeated calculations & clarified thresholds
-//  - Early returns consolidated
-//  - Minor inlining hints for hot path helpers
+// New optimizations added in this pass:
+//  - Optional direct mesh/material spawning (bypasses full Scene hierarchy) for trees
+//    reducing entity count & potential draw calls (shared mesh/material = GPU instancing).
+//  - Approximate draw call debug system (unique (mesh, material, shadow state) among visible trees).
+//  - Config flags: use_instanced, debug_draw_calls, draw_call_log_interval.
+//  - Dual batching (scene vs pbr) to avoid per‑entity spawns.
 //
 // Existing optimizations retained:
 //  - Early rejection before expensive surface sampling
 //  - Progressive streaming spawn (frame‑budgeted)
+//  - Spatial hash spacing
 //  - Config resources (runtime tunable)
 //  - Preloaded scene handles
 //  - Batched entity creation (spawn_batch)
@@ -16,8 +17,8 @@
 //  - Shadow LOD with hysteresis
 //  - Adaptive performance tuner
 //
-// Future potential (not yet):
-//  - True GPU instancing capture original child local transforms
+// Future potential:
+//  - True GPU buffer-based instancing capturing original child local transforms
 //  - Billboard / impostor far LOD
 //  - Streaming unload + spatial partition for runtime memory reclaim
 //  - Parallel sampling via task pool
@@ -55,6 +56,14 @@ impl Plugin for VegetationPlugin {
                     TimerMode::Repeating,
                 ),
             })
+            .insert_resource(VegetationDebugState {
+                timer: Timer::from_seconds(
+                    VegetationConfig::default().draw_call_log_interval,
+                    TimerMode::Repeating,
+                ),
+                last_visible: 0,
+                last_unique: 0,
+            })
             .add_systems(
                 Update,
                 (
@@ -64,6 +73,7 @@ impl Plugin for VegetationPlugin {
                     cull_trees.after(progressive_spawn_trees),
                     tree_lod_update.after(cull_trees),
                     vegetation_perf_tuner.after(tree_lod_update),
+                    vegetation_draw_call_debug.after(vegetation_perf_tuner),
                 ),
             );
     }
@@ -106,11 +116,15 @@ pub struct VegetationConfig {
     pub hero_scale_min_mul: f32, // min multiplier for hero scale
     pub hero_scale_max_mul: f32, // max multiplier for hero scale
     pub tilt_max_deg: f32,       // random tilt around X/Z to avoid uniform uprights
+    // New flags
+    pub use_instanced: bool,         // if true spawn single-mesh PbrBundle instead of entire Scene
+    pub debug_draw_calls: bool,      // enable approximate draw call logging
+    pub draw_call_log_interval: f32, // seconds between debug logs
 }
 impl Default for VegetationConfig {
     fn default() -> Self {
         Self {
-            cell_size: 6.0, // slightly finer sampling
+            cell_size: 6.0,
             noise_freq: 0.035,
             base_density: 1.0,
             threshold: 0.50,
@@ -130,6 +144,9 @@ impl Default for VegetationConfig {
             hero_scale_min_mul: 1.6,
             hero_scale_max_mul: 2.4,
             tilt_max_deg: 7.0,
+            use_instanced: true,
+            debug_draw_calls: true,
+            draw_call_log_interval: 2.0,
         }
     }
 }
@@ -239,6 +256,14 @@ struct VegetationMeshVariants {
 #[derive(Component)]
 struct TreeTemplate;
 
+// Debug state
+#[derive(Resource)]
+struct VegetationDebugState {
+    timer: Timer,
+    last_visible: usize,
+    last_unique: usize,
+}
+
 // ---------------- Spatial Hash For Spacing Rejection ----------------
 
 #[derive(Default)]
@@ -302,13 +327,12 @@ struct VegetationSpawnState {
     slope_rejects: usize,
     inner_spawned: usize,
     finished: bool,
-    batch: Vec<(SceneBundle, (Tree, TreeCulled, TreeLod))>,
+    batch_scene: Vec<(SceneBundle, (Tree, TreeCulled, TreeLod))>,
+    batch_pbr: Vec<(PbrBundle, (Tree, TreeCulled, TreeLod))>,
     spacing_grid: SpacingGrid,
     half_extent: f32,
     seen_cells: HashSet<(i32, i32)>,
 }
-
-// Candidate struct removed (fields were unused beyond transform construction)
 
 // ---------------- Utility / Functional Stages ----------------
 
@@ -415,6 +439,18 @@ fn random_tree_handle(rng: &mut impl Rng, a: &Handle<Scene>, b: &Handle<Scene>) 
     }
 }
 
+#[inline(always)]
+fn random_variant<'a>(
+    rng: &mut impl Rng,
+    variants: &'a [(Handle<Mesh>, Handle<StandardMaterial>)],
+) -> Option<&'a (Handle<Mesh>, Handle<StandardMaterial>)> {
+    if variants.is_empty() {
+        None
+    } else {
+        Some(&variants[rng.gen_range(0..variants.len())])
+    }
+}
+
 // Region weighting strategy.
 // Returns (weight, region_inner_flag).
 fn region_weight(r_len: f32, play_r: f32, rim_start: f32, rim_peak: f32) -> (f32, bool) {
@@ -451,7 +487,8 @@ fn prepare_vegetation(
     let tree2 = assets.load("models/tree_2.glb#Scene0");
 
     // Spacing grid cell: half of smallest spacing for fine granularity
-    let spacing_cell = (cfg.min_spacing_rim.min(cfg.min_spacing_slope).min(cfg.min_spacing_inner) * 0.5).max(1.0);
+    let spacing_cell =
+        (cfg.min_spacing_rim.min(cfg.min_spacing_slope).min(cfg.min_spacing_inner) * 0.5).max(1.0);
 
     commands.insert_resource(VegetationAssets {
         tree1: tree1.clone(),
@@ -476,7 +513,8 @@ fn prepare_vegetation(
         slope_rejects: 0,
         inner_spawned: 0,
         finished: false,
-        batch: Vec::with_capacity(cfg.batch_spawn_flush),
+        batch_scene: Vec::with_capacity(cfg.batch_spawn_flush),
+        batch_pbr: Vec::with_capacity(cfg.batch_spawn_flush),
         spacing_grid: SpacingGrid::new(spacing_cell),
         half_extent: half,
         seen_cells,
@@ -536,7 +574,7 @@ fn extract_tree_mesh_variants(
     }
 
     if !collected.is_empty() {
-        collected.truncate(2);
+        collected.truncate(4); // allow a few variants
         variants.variants = collected;
         variants.ready = true;
         for root in q_templates.iter() {
@@ -584,7 +622,8 @@ fn vegetation_expand_area(
                 continue;
             }
             state.seen_cells.insert(key);
-            state.points.push(Vec2::new(i as f32 * cfg.cell_size, j as f32 * cfg.cell_size));
+            state.points
+                .push(Vec2::new(i as f32 * cfg.cell_size, j as f32 * cfg.cell_size));
         }
     }
 
@@ -605,7 +644,7 @@ fn progressive_spawn_trees(
     sampler: Res<TerrainSampler>,
     mut state: ResMut<VegetationSpawnState>,
     assets: Res<VegetationAssets>,
-    _variants: Res<VegetationMeshVariants>,
+    variants: Res<VegetationMeshVariants>,
     cfg: Res<VegetationConfig>,
 ) {
     if state.finished {
@@ -619,6 +658,8 @@ fn progressive_spawn_trees(
     let play_r = sampler.cfg.play_radius;
     let rim_start = sampler.cfg.rim_start;
     let rim_peak = sampler.cfg.rim_peak;
+
+    let use_pbr = cfg.use_instanced && variants.ready && !variants.variants.is_empty();
 
     while state.cursor < end && state.spawned < cfg.max_instances {
         let base = state.points[state.cursor];
@@ -651,7 +692,10 @@ fn progressive_spawn_trees(
         let n_val = noise_density(&assets.perlin, p, cfg.noise_freq);
 
         // Low-frequency patch noise for clustering
-        let patch_raw = assets.perlin.get([p.x as f64 * cfg.patch_noise_freq, p.y as f64 * cfg.patch_noise_freq]);
+        let patch_raw =
+            assets
+                .perlin
+                .get([p.x as f64 * cfg.patch_noise_freq, p.y as f64 * cfg.patch_noise_freq]);
         let patch_norm = (patch_raw as f32 * 0.5 + 0.5).clamp(0.0, 1.0);
         let centered = (patch_norm - 0.5) * cfg.patch_contrast;
         let patch_mod = (centered + 0.5).clamp(0.0, 1.0).powf(1.2); // emphasize extremes a bit
@@ -693,16 +737,30 @@ fn progressive_spawn_trees(
         }
 
         let transform = build_transform(p, h, &mut rng, &cfg);
-        // Still using full scenes (template local offsets lost for direct mesh instancing)
-        let handle = random_tree_handle(&mut rng, &assets.tree1, &assets.tree2);
-        state.batch.push((
-            SceneBundle {
-                scene: handle,
-                transform,
-                ..default()
-            },
-            (Tree, TreeCulled(false), TreeLod { shadows_on: true }),
-        ));
+
+        if use_pbr {
+            if let Some((mesh, material)) = random_variant(&mut rng, &variants.variants) {
+                state.batch_pbr.push((
+                    PbrBundle {
+                        mesh: mesh.clone(),
+                        material: material.clone(),
+                        transform,
+                        ..default()
+                    },
+                    (Tree, TreeCulled(false), TreeLod { shadows_on: true }),
+                ));
+            }
+        } else {
+            let handle = random_tree_handle(&mut rng, &assets.tree1, &assets.tree2);
+            state.batch_scene.push((
+                SceneBundle {
+                    scene: handle,
+                    transform,
+                    ..default()
+                },
+                (Tree, TreeCulled(false), TreeLod { shadows_on: true }),
+            ));
+        }
 
         if region_inner {
             state.inner_spawned += 1;
@@ -710,33 +768,54 @@ fn progressive_spawn_trees(
         state.spacing_grid.insert(p);
         state.spawned += 1;
 
-        if state.batch.len() >= cfg.batch_spawn_flush {
-            let drained = std::mem::take(&mut state.batch);
-            commands.spawn_batch(drained.into_iter().map(|(bundle, comps)| {
-                (bundle, comps.0, comps.1, comps.2)
-            }));
+        if state.batch_scene.len() >= cfg.batch_spawn_flush {
+            let drained = std::mem::take(&mut state.batch_scene);
+            commands.spawn_batch(
+                drained
+                    .into_iter()
+                    .map(|(bundle, comps)| (bundle, comps.0, comps.1, comps.2)),
+            );
+        }
+        if state.batch_pbr.len() >= cfg.batch_spawn_flush {
+            let drained = std::mem::take(&mut state.batch_pbr);
+            commands.spawn_batch(
+                drained
+                    .into_iter()
+                    .map(|(bundle, comps)| (bundle, comps.0, comps.1, comps.2)),
+            );
         }
     }
 
     // Flush remainder
-    if !state.batch.is_empty() {
-        let drained = std::mem::take(&mut state.batch);
-        commands.spawn_batch(drained.into_iter().map(|(bundle, comps)| {
-            (bundle, comps.0, comps.1, comps.2)
-        }));
+    if !state.batch_scene.is_empty() {
+        let drained = std::mem::take(&mut state.batch_scene);
+        commands.spawn_batch(
+            drained
+                .into_iter()
+                .map(|(bundle, comps)| (bundle, comps.0, comps.1, comps.2)),
+        );
+    }
+    if !state.batch_pbr.is_empty() {
+        let drained = std::mem::take(&mut state.batch_pbr);
+        commands.spawn_batch(
+            drained
+                .into_iter()
+                .map(|(bundle, comps)| (bundle, comps.0, comps.1, comps.2)),
+        );
     }
 
     // Finish condition
     if state.cursor >= total_points || state.spawned >= cfg.max_instances {
         state.finished = true;
         info!(
-            "Vegetation build complete: spawned {} (inner={}) / attempts {} (early_noise_rejects={}, slope_rejects={}, points={})",
+            "Vegetation build complete: spawned {} (inner={}) / attempts {} (early_noise_rejects={}, slope_rejects={}, points={}) [instanced:{}]",
             state.spawned,
             state.inner_spawned,
             state.attempts,
             state.early_noise_rejects,
             state.slope_rejects,
-            total_points
+            total_points,
+            use_pbr
         );
     }
 }
@@ -894,4 +973,41 @@ fn vegetation_perf_tuner(
     if cull_cfg.max_distance < lod_cfg.shadows_full_off + 10.0 {
         cull_cfg.max_distance = lod_cfg.shadows_full_off + 10.0;
     }
+}
+
+// Approximate draw call debugging (counts unique mesh/material/shadow combos among visible Tree roots).
+fn vegetation_draw_call_debug(
+    time: Res<Time>,
+    cfg: Res<VegetationConfig>,
+    mut dbg_state: ResMut<VegetationDebugState>,
+    q_tree_mesh: Query<
+        (&Handle<Mesh>, &Handle<StandardMaterial>, Option<&NotShadowCaster>, &TreeCulled),
+        With<Tree>,
+    >,
+) {
+    if !cfg.debug_draw_calls {
+        return;
+    }
+    if !dbg_state.timer.tick(time.delta()).just_finished() {
+        return;
+    }
+
+    // Use Handle/AssetId hashing directly (no uuid() in Bevy 0.14).
+    let mut unique: HashSet<(Handle<Mesh>, Handle<StandardMaterial>, bool)> = HashSet::new();
+    let mut visible = 0usize;
+    for (mesh, mat, shadow_flag, culled) in &q_tree_mesh {
+        if culled.0 {
+            continue;
+        }
+        visible += 1;
+        let key = (mesh.clone(), mat.clone(), shadow_flag.is_none());
+        unique.insert(key);
+    }
+
+    dbg_state.last_visible = visible;
+    dbg_state.last_unique = unique.len();
+    info!(
+        "Vegetation DrawCallDebug: visible_trees={} approx_unique_batches={} (instanced_mode={})",
+        visible, dbg_state.last_unique, cfg.use_instanced
+    );
 }
