@@ -96,11 +96,14 @@ pub struct LevelDef {
 
 pub struct LevelPlugin;
 
+#[derive(Component)]
+struct SkyDome;
+
 impl Plugin for LevelPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, load_level)
             .add_systems(Startup, spawn_level.after(load_level))
-            .add_systems(Update, spawn_runtime_ball);
+            .add_systems(Update, (spawn_runtime_ball, track_sky_dome));
     }
 }
 
@@ -148,16 +151,19 @@ fn spawn_level(
     // Sky
     let sky_tex = assets.load(level.sky.texture.clone());
     let sky_mesh = generate_inverted_sphere(level.sky.longitudes, level.sky.latitudes, level.sky.radius);
-    commands.spawn(PbrBundle {
-        mesh: meshes.add(sky_mesh),
-        material: mats.add(StandardMaterial {
-            base_color_texture: Some(sky_tex),
-            unlit: true,
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(sky_mesh),
+            material: mats.add(StandardMaterial {
+                base_color_texture: Some(sky_tex),
+                unlit: true,
+                ..default()
+            }),
+            transform: Transform::IDENTITY,
             ..default()
-        }),
-        transform: Transform::IDENTITY,
-        ..default()
-    });
+        },
+        SkyDome,
+    ));
 
     // Directional light (simple fixed)
     commands.spawn(DirectionalLightBundle {
@@ -212,6 +218,16 @@ fn spawn_level(
     });
     if let Some(ref mut s) = score {
         s.max_holes = level.scoring.max_holes;
+    }
+}
+
+fn track_sky_dome(
+    q_cam: Query<&Transform, (With<OrbitCamera>, Without<SkyDome>)>,
+    mut q_sky: Query<&mut Transform, (With<SkyDome>, Without<OrbitCamera>)>,
+) {
+    if let (Ok(cam), Ok(mut sky)) = (q_cam.get_single(), q_sky.get_single_mut()) {
+        // Keep sky centered on camera so it appears infinite.
+        sky.translation = cam.translation;
     }
 }
 

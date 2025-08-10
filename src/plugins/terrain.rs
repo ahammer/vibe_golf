@@ -1,12 +1,13 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
-use noise::Perlin;
+use noise::{Perlin, NoiseFn};
 use bevy::render::mesh::PrimitiveTopology;
 use bevy::pbr::{ExtendedMaterial, StandardMaterial};
 use std::collections::HashMap;
 use crate::plugins::contour_material::{ContourExtension, topo_palette};
 use crate::plugins::terrain_graph::{build_terrain_graph, NodeRef, GraphContext};
 use crate::plugins::ball::Ball;
+use rand::prelude::*;
 
 /// Configuration for procedural terrain height sampling & mesh generation.
 #[derive(Resource, Clone)]
@@ -24,6 +25,12 @@ pub struct TerrainConfig {
     pub detail_octaves: u8,
     pub warp_frequency: f64,
     pub warp_amplitude: f32,
+    // Macro terrain / biome parameters
+    pub macro_frequency: f64,   // very low frequency controlling valleys / mountains
+    pub mountain_start: f32,    // macro value where mountains begin
+    pub mountain_end: f32,      // macro value where mountains are fully active
+    pub valley_start: f32,      // macro value where valleys start fading out
+    pub valley_end: f32,        // macro value where valleys fully active (lower than start)
     // Chunked terrain params
     pub chunk_size: f32,      // world size of a chunk (edge length)
     pub resolution: u32,      // quads per side (vertices = (res+1)^2)
@@ -34,6 +41,9 @@ pub struct TerrainConfig {
     pub rim_start: f32,
     pub rim_peak: f32,
     pub rim_height: f32,
+    pub vegetation_per_chunk: u32,
+    pub mountain_height: f32,
+    pub valley_depth: f32,
 }
 
 impl Default for TerrainConfig {
@@ -53,12 +63,20 @@ impl Default for TerrainConfig {
             // Reduced chunk size & resolution to allow many chunks with similar total vertex counts.
             chunk_size: 160.0,
             resolution: 96,
-            view_radius_chunks: 2,        // (2*2+1)^2 = 25 chunks max
-            max_spawn_per_frame: 4,
+            view_radius_chunks: 4,        // (2*4+1)^2 = 81 chunks (wider horizon)
+            max_spawn_per_frame: 8,
+            macro_frequency: 0.0025,      // very low frequency (macro landforms)
+            mountain_start: 0.62,
+            mountain_end: 0.75,
+            valley_start: 0.45,
+            valley_end: 0.30,
             play_radius: 70.0,
             rim_start: 90.0,
             rim_peak: 150.0,
             rim_height: 10.0,
+            vegetation_per_chunk: 40,
+            mountain_height: 28.0,
+            valley_depth: 12.0,
         }
     }
 }
@@ -93,7 +111,27 @@ impl TerrainSampler {
             seed_offset: self.seed_offset,
         };
         let base = self.graph.sample(x, z, &ctx);
-        base * self.cfg.amplitude
+
+        // Macro shaping (valleys, hills, mountains)
+        let macro_v = self.macro_value(x, z);
+        let cfg = &self.cfg;
+        let smooth = |a: f32, b: f32, v: f32| {
+            if (b - a).abs() < 1e-6 { return 0.0; }
+            let mut t = ((v - a) / (b - a)).clamp(0.0, 1.0);
+            t = t * t * (3.0 - 2.0 * t);
+            t
+        };
+        let mountain_t = smooth(cfg.mountain_start, cfg.mountain_end, macro_v);
+        let valley_t = smooth(cfg.valley_end, cfg.valley_start, macro_v); // reversed (higher when macro_v lower)
+
+        // Scale base undulations: valleys slightly smoother, mountains amplify relief
+        let relief_scale = 0.75 + 0.55 * mountain_t + 0.25 * valley_t;
+
+        // Add large scale offsets: uplift mountains, depress valleys
+        let uplift = mountain_t.powf(1.35) * cfg.mountain_height;
+        let depress = valley_t.powf(1.25) * cfg.valley_depth;
+
+        (base * relief_scale + uplift - depress) * cfg.amplitude
     }
 
     /// Central-difference normal.
@@ -107,6 +145,13 @@ impl TerrainSampler {
         let dx = h_l - h_r;
         let dz = h_d - h_u;
         Vec3::new(dx, 2.0 * d, dz).normalize_or_zero()
+    }
+
+    /// Macro biome value 0..1 (valley..mountain) used for vegetation & future biome logic.
+    pub fn macro_value(&self, x: f32, z: f32) -> f32 {
+        let nx = (x + self.seed_offset.x) as f64 * self.cfg.macro_frequency;
+        let nz = (z + self.seed_offset.y) as f64 * self.cfg.macro_frequency;
+        (self.perlin.get([nx, nz]) as f32) * 0.5 + 0.5
     }
 }
 
@@ -136,7 +181,7 @@ impl Plugin for TerrainPlugin {
         app.insert_resource(TerrainConfig::default())
             .add_systems(PreStartup, init_sampler)
             .insert_resource(LoadedChunks::default())
-            .add_systems(Update, update_terrain_chunks);
+            .add_systems(Update, (update_terrain_chunks, populate_chunk_vegetation));
     }
 }
 
@@ -170,6 +215,13 @@ fn update_terrain_chunks(
         }
     }
 
+    // Sort desired coords so nearer chunks spawn first (improves perceived pop-in)
+    desired.sort_by_key(|c| {
+        let dx = c.x - center_chunk.x;
+        let dz = c.y - center_chunk.y;
+        dx * dx + dz * dz
+    });
+
     // Spawn budget
     let mut spawned_this_frame = 0usize;
 
@@ -199,6 +251,85 @@ fn update_terrain_chunks(
 
     // Optional: future LOD / streaming pacing can use time.delta_seconds() etc.
     let _dt = time.delta_seconds();
+}
+
+#[derive(Component)]
+pub struct VegetationInstance;
+
+fn populate_chunk_vegetation(
+    mut commands: Commands,
+    sampler: Res<TerrainSampler>,
+    cfg: Res<TerrainConfig>,
+    assets: Res<AssetServer>,
+    q_new: Query<(Entity, &TerrainChunk, &Transform), Added<TerrainChunk>>,
+) {
+    let models = [
+        "models/tree_1.glb#Scene0",
+        "models/tree_2.glb#Scene0",
+        "models/candy_1.glb#Scene0",
+        "models/candy_2.glb#Scene0",
+        "models/meatball.glb#Scene0",
+        "models/snowflake.glb#Scene0",
+    ];
+    for (chunk_entity, _chunk, t_chunk) in &q_new {
+        let base = t_chunk.translation;
+        // Parent vegetation to chunk so it despawns automatically.
+        commands.entity(chunk_entity).with_children(|c| {
+            // Rejection sampling: attempt more candidates to achieve target count biased to valleys & gentle slopes.
+            let mut placed = 0u32;
+            let mut attempts = 0u32;
+            let max_attempts = cfg.vegetation_per_chunk * 6;
+            while placed < cfg.vegetation_per_chunk && attempts < max_attempts {
+                attempts += 1;
+                let rx: f32 = random();
+                let rz: f32 = random();
+                let x = base.x + rx * cfg.chunk_size;
+                let z = base.z + rz * cfg.chunk_size;
+                let h = sampler.height(x, z);
+                let n = sampler.normal(x, z);
+                if n.y < 0.60 { // avoid steeper slopes
+                    continue;
+                }
+                let macro_v = sampler.macro_value(x, z);
+                // Compute valley & mountain factors
+                let m_start = cfg.mountain_start;
+                let m_end = cfg.mountain_end;
+                let v_start = cfg.valley_start;
+                let v_end = cfg.valley_end;
+                let smooth = |a: f32, b: f32, v: f32| {
+                    if (b - a).abs() < 1e-6 { return 0.0; }
+                    let mut t = ((v - a) / (b - a)).clamp(0.0, 1.0);
+                    t = t * t * (3.0 - 2.0 * t);
+                    t
+                };
+                let mountain_t = smooth(m_start, m_end, macro_v);
+                let valley_t = smooth(v_end, v_start, macro_v); // reversed
+
+                // Probability weight: prefer valleys & mid hills, sparse mountains
+                let weight = 0.15 + valley_t * 0.55 + (1.0 - mountain_t) * 0.25;
+                if random::<f32>() > weight {
+                    continue;
+                }
+
+                let model = models[random::<usize>() % models.len()];
+                let r = random::<f32>();
+                // Scale influenced by valley/mountain (larger in valleys)
+                let scale_bias = 0.4 + valley_t * 0.8;
+                let scale = (0.4 + (r * r) * 1.8) * scale_bias.clamp(0.5, 1.4);
+                c.spawn((
+                    SceneBundle {
+                        scene: assets.load(model),
+                        transform: Transform::from_xyz(x, h, z)
+                            .with_scale(Vec3::splat(scale))
+                            .with_rotation(Quat::from_rotation_y(random::<f32>() * std::f32::consts::TAU)),
+                        ..default()
+                    },
+                    VegetationInstance,
+                ));
+                placed += 1;
+            }
+        });
+    }
 }
 
 /// Spawn a single chunk at grid coordinate.
