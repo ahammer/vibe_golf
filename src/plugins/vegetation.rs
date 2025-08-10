@@ -32,6 +32,7 @@ impl Plugin for VegetationPlugin {
             .insert_resource(VegetationCullingConfig::default())
             .insert_resource(VegetationLodConfig::default())
             .insert_resource(VegetationPerfTuner::default())
+            .insert_resource(VegetationMeshVariants::default())
             .add_systems(Startup, prepare_vegetation)
             .insert_resource(VegetationCullingState {
                 timer: Timer::from_seconds(VegetationCullingConfig::default().update_interval, TimerMode::Repeating),
@@ -40,6 +41,7 @@ impl Plugin for VegetationPlugin {
                 timer: Timer::from_seconds(VegetationLodConfig::default().update_interval, TimerMode::Repeating),
             })
             .add_systems(Update, (
+                extract_tree_mesh_variants.before(progressive_spawn_trees),
                 progressive_spawn_trees,
                 cull_trees.after(progressive_spawn_trees),
                 tree_lod_update.after(cull_trees),
@@ -192,6 +194,66 @@ struct VegetationAssets {
     perlin: Perlin,
 }
 
+// Instanced mesh/material variants extracted from the scene glbs.
+// Once ready we spawn PbrBundle instances instead of full SceneBundle hierarchies.
+#[derive(Resource, Default)]
+struct VegetationMeshVariants {
+    ready: bool,
+    variants: Vec<(Handle<Mesh>, Handle<StandardMaterial>)>,
+}
+
+#[derive(Component)]
+struct TreeTemplate;
+
+// Extract meshes + materials from hidden template scene instances.
+fn extract_tree_mesh_variants(
+    mut commands: Commands,
+    mut variants: ResMut<VegetationMeshVariants>,
+    q_templates: Query<Entity, With<TreeTemplate>>,
+    q_children: Query<&Children>,
+    q_mesh_mats: Query<(&Handle<Mesh>, &Handle<StandardMaterial>)>,
+) {
+    if variants.ready {
+        return;
+    }
+    let mut collected: Vec<(Handle<Mesh>, Handle<StandardMaterial>)> = Vec::new();
+
+    // Recursive descent
+    fn visit(
+        e: Entity,
+        q_children: &Query<&Children>,
+        q_mesh_mats: &Query<(&Handle<Mesh>, &Handle<StandardMaterial>)>,
+        out: &mut Vec<(Handle<Mesh>, Handle<StandardMaterial>)>,
+    ) {
+        if let Ok((mesh, mat)) = q_mesh_mats.get(e) {
+            out.push((mesh.clone(), mat.clone()));
+        }
+        if let Ok(children) = q_children.get(e) {
+            for &c in children.iter() {
+                visit(c, q_children, q_mesh_mats, out);
+            }
+        }
+    }
+
+    for root in q_templates.iter() {
+        visit(root, &q_children, &q_mesh_mats, &mut collected);
+    }
+
+    // Keep first two distinct variants (if more collected)
+    if !collected.is_empty() {
+        collected.truncate(2);
+        if !collected.is_empty() {
+            variants.variants = collected;
+            variants.ready = true;
+            // Despawn templates now that we have raw mesh/material handles
+            for root in q_templates.iter() {
+                commands.entity(root).despawn_recursive();
+            }
+            info!("Vegetation instancing: extracted {} tree mesh variants", variants.variants.len());
+        }
+    }
+}
+
 // Progressive spawn state
 #[derive(Resource)]
 struct VegetationSpawnState {
@@ -314,7 +376,8 @@ fn prepare_vegetation(
     let perlin = Perlin::new(sampler.cfg.seed.wrapping_add(917_331));
     let tree1 = assets.load("models/tree_1.glb#Scene0");
     let tree2 = assets.load("models/tree_2.glb#Scene0");
-    commands.insert_resource(VegetationAssets { tree1, tree2, perlin });
+    // Clone handles so we can both store them in the resource and still use the local copies
+    commands.insert_resource(VegetationAssets { tree1: tree1.clone(), tree2: tree2.clone(), perlin });
     commands.insert_resource(VegetationSpawnState {
         points,
         cursor: 0,
@@ -327,6 +390,26 @@ fn prepare_vegetation(
         batch: Vec::with_capacity(cfg.batch_spawn_flush),
         accepted_positions: Vec::new(),
     });
+
+    // Spawn hidden template scenes to extract mesh/material variants for instancing.
+    commands.spawn((
+        SceneBundle {
+            scene: tree1.clone(),
+            visibility: Visibility::Hidden,
+            ..default()
+        },
+        TreeTemplate,
+        Name::new("TreeTemplate1"),
+    ));
+    commands.spawn((
+        SceneBundle {
+            scene: tree2.clone(),
+            visibility: Visibility::Hidden,
+            ..default()
+        },
+        TreeTemplate,
+        Name::new("TreeTemplate2"),
+    ));
 }
 
 fn progressive_spawn_trees(
@@ -334,6 +417,7 @@ fn progressive_spawn_trees(
     sampler: Res<TerrainSampler>,
     mut state: ResMut<VegetationSpawnState>,
     assets: Res<VegetationAssets>,
+    variants: Res<VegetationMeshVariants>,
     cfg: Res<VegetationConfig>,
 ) {
     if state.finished {
@@ -448,16 +532,33 @@ fn progressive_spawn_trees(
         }
 
         if decide_spawn(candidate.density, cfg.threshold) {
-            let handle = random_tree_handle(&mut rng, &assets.tree1, &assets.tree2);
             let transform = build_transform(&candidate, &mut rng, &cfg);
-            state.batch.push((
-                SceneBundle {
-                    scene: handle,
-                    transform,
-                    ..default()
-                },
-                (Tree, TreeCulled(false), TreeLod { shadows_on: true }),
-            ));
+            if variants.ready && !variants.variants.is_empty() {
+                // Use instanced mesh/material variant
+                let (mesh, material) = &variants.variants[rng.gen_range(0..variants.variants.len())];
+                commands.spawn((
+                    PbrBundle {
+                        mesh: mesh.clone(),
+                        material: material.clone(),
+                        transform,
+                        ..default()
+                    },
+                    Tree,
+                    TreeCulled(false),
+                    TreeLod { shadows_on: true },
+                ));
+            } else {
+                // Fallback: spawn full scene (pre-extraction)
+                let handle = random_tree_handle(&mut rng, &assets.tree1, &assets.tree2);
+                state.batch.push((
+                    SceneBundle {
+                        scene: handle,
+                        transform,
+                        ..default()
+                    },
+                    (Tree, TreeCulled(false), TreeLod { shadows_on: true }),
+                ));
+            }
             if region_inner {
                 state.inner_spawned += 1;
             }
