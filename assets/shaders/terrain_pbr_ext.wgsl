@@ -52,7 +52,16 @@ struct RealTerrainExtendedMaterial {
     roughness_snow: f32,
     color_variation: f32,
     ao_strength: f32,
-    _pad2: vec2<f32>,
+    brightness: f32,
+    contrast: f32,
+    saturation: f32,
+    macro_amp: f32,
+    micro_amp: f32,
+    edge_accent: f32,
+    gamma: f32,
+    macro_scale: f32,
+    micro_scale: f32,
+    animation_speed: f32,
 };
 
 @group(2) @binding(100)
@@ -113,10 +122,10 @@ fn fragment(
     var grass_w = 1.0 - (lowland_w + rock_w + snow_w);
     grass_w = max(0.0, grass_w);
 
-    // Procedural noise to break up transitions
+    // Procedural noise to break up transitions (optionally animated)
     let npos = in.world_position.xz * realterrain_extended_material.noise_scale;
-    let t = realterrain_extended_material.time;
-    let wind_shift = vec2<f32>(0.07 * t, 0.05 * t);
+    let anim_t = realterrain_extended_material.time * realterrain_extended_material.animation_speed;
+    let wind_shift = vec2<f32>(0.07 * anim_t, 0.05 * anim_t);
     let n = noise(npos + wind_shift);
     let n2 = noise((npos + wind_shift * 1.7) * 1.9);
 
@@ -142,16 +151,37 @@ fn fragment(
                    c_rock * weights.z +
                    c_snow * weights.w;
 
+    // Macro & micro variation (parameterized)
+    let npos2 = in.world_position.xz * realterrain_extended_material.noise_scale;
+    let anim_t2 = realterrain_extended_material.time * realterrain_extended_material.animation_speed * 0.2;
+    let macro_n = noise(npos2 * realterrain_extended_material.macro_scale + vec2<f32>(anim_t2, -anim_t2));
+    let micro_n = noise(npos2 * realterrain_extended_material.micro_scale + vec2<f32>(-anim_t2*2.0, anim_t2));
+    let macro_v = (macro_n - 0.5);
+    let micro_v = (micro_n - 0.5);
+
     // Subtle ambient occlusion from slope + inverse height (heuristic)
     let cavity = clamp((slope * 0.6) + (1.0 - h_norm) * 0.25, 0.0, 1.0);
     let ao = mix(1.0, cavity, realterrain_extended_material.ao_strength);
-
-    // Apply AO pre-lighting
     base_col *= ao;
 
-    // Slight tone mapping / soft contrast
+    // Global brightness
+    base_col *= realterrain_extended_material.brightness;
+
+    // Apply macro shading (broad tonal shifts) & micro speckle (fine contrast)
+    base_col *= (1.0 + macro_v * realterrain_extended_material.macro_amp);
+    base_col += micro_v * realterrain_extended_material.micro_amp;
+
+    // Height & slope based extra contrast: darken steep & high transition edges slightly
+    let edge_factor = clamp(slope * 0.5 + smoothstep(0.55, 0.75, h_norm) * 0.3, 0.0, 1.0);
+    base_col *= (1.0 - edge_factor * realterrain_extended_material.edge_accent);
+
+    // Boost chroma & contrast (parameterized)
     let avg = (base_col.r + base_col.g + base_col.b) / 3.0;
-    base_col = mix(vec3<f32>(avg), base_col, 1.10); // saturation boost
+    base_col = mix(vec3<f32>(avg), base_col, realterrain_extended_material.saturation);
+    base_col = (base_col - vec3<f32>(0.5)) * realterrain_extended_material.contrast + vec3<f32>(0.5);
+
+    // Gamma
+    base_col = clamp(pow(base_col, vec3<f32>(realterrain_extended_material.gamma)), vec3<f32>(0.0), vec3<f32>(1.0));
 
     // Blend roughness
     let r_low  = realterrain_extended_material.roughness_lowland;

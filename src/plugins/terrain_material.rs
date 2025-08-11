@@ -21,7 +21,17 @@ pub struct RealTerrainUniform {
     pub roughness_snow: f32,
     pub color_variation: f32,
     pub ao_strength: f32,
-    pub _pad2: Vec2,
+    // New tunable visual parameters
+    pub brightness: f32,
+    pub contrast: f32,
+    pub saturation: f32,
+    pub macro_amp: f32,
+    pub micro_amp: f32,
+    pub edge_accent: f32,
+    pub gamma: f32,
+    pub macro_scale: f32,
+    pub micro_scale: f32,
+    pub animation_speed: f32,
 }
 
 impl Default for RealTerrainUniform {
@@ -47,7 +57,16 @@ impl Default for RealTerrainUniform {
             roughness_snow: 0.40,
             color_variation: 0.08,
             ao_strength: 0.6,
-            _pad2: Vec2::ZERO,
+            brightness: 0.90,
+            contrast: 1.35,
+            saturation: 1.25,
+            macro_amp: 0.45,
+            micro_amp: 0.10,
+            edge_accent: 0.10,
+            gamma: 1.08,
+            macro_scale: 0.18,
+            micro_scale: 3.5,
+            animation_speed: 0.0, // 0 = static (prevents temporal aliasing)
         }
     }
 }
