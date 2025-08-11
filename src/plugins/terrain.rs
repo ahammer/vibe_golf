@@ -1,43 +1,42 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
-use noise::{Perlin, NoiseFn};
 use bevy::render::mesh::PrimitiveTopology;
 use bevy::pbr::{ExtendedMaterial, StandardMaterial};
 use std::collections::{HashMap, HashSet};
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use futures_lite::future::{block_on, poll_once};
 use crate::plugins::contour_material::{ContourExtension, topo_palette};
-use crate::plugins::terrain_graph::{build_terrain_graph, NodeRef, GraphContext};
 use crate::plugins::ball::Ball;
+use std::sync::Arc;
 
-/// Configuration for procedural terrain height sampling & mesh generation.
+/// Configuration for terrain. Retains legacy procedural fields for now (unused in heightmap mode).
 #[derive(Resource, Clone)]
 pub struct TerrainConfig {
     pub seed: u32,
     pub amplitude: f32,
-    // Legacy fields (kept for potential reuse)
+    // Legacy fields (unused now)
     pub frequency: f64,
     pub octaves: u8,
     pub lacunarity: f64,
     pub gain: f64,
-    // Multi-scale parameters
+    // Multi-scale parameters (unused)
     pub base_frequency: f64,
     pub detail_frequency: f64,
     pub detail_octaves: u8,
     pub warp_frequency: f64,
     pub warp_amplitude: f32,
-    // Macro terrain / biome parameters
-    pub macro_frequency: f64,   // very low frequency controlling valleys / mountains
+    // Macro terrain / biome parameters (unused)
+    pub macro_frequency: f64,
     pub mountain_start: f32,
     pub mountain_end: f32,
     pub valley_start: f32,
     pub valley_end: f32,
     // Chunked terrain params
     pub chunk_size: f32,
-    pub resolution: u32,            // near (LOD0) resolution
+    pub resolution: u32,
     pub view_radius_chunks: i32,
     pub max_spawn_per_frame: usize,
-    // Radial shaping (local crater) still applied (can later gate by distance)
+    // Radial shaping (unused now)
     pub play_radius: f32,
     pub rim_start: f32,
     pub rim_peak: f32,
@@ -45,18 +44,25 @@ pub struct TerrainConfig {
     pub vegetation_per_chunk: u32,
     pub mountain_height: f32,
     pub valley_depth: f32,
-    // LOD (OPT-06)
-    pub lod_mid_distance: f32,      // world distance threshold for mid LOD
-    pub lod_far_distance: f32,      // world distance threshold for far LOD
-    pub lod_mid_resolution: u32,    // mesh resolution for mid ring
-    pub lod_far_resolution: u32,    // mesh resolution for far ring
+    // LOD
+    pub lod_mid_distance: f32,
+    pub lod_far_distance: f32,
+    pub lod_mid_resolution: u32,
+    pub lod_far_resolution: u32,
+    // Heightmap specific
+    // World size of the heightmap square in meters (2 km x 2 km).
+    pub heightmap_world_size: f32,
+    // Maximum elevation represented by a full-intensity (255) red channel (700 m).
+    pub heightmap_max_height: f32,
+    // Path to heightmap (red channel = height).
+    pub heightmap_path: String,
 }
 
 impl Default for TerrainConfig {
     fn default() -> Self {
         Self {
             seed: 1337,
-            amplitude: 4.0,
+            amplitude: 1.0, // no longer used as main vertical scale; kept for optional post-scale
             frequency: 0.08,
             octaves: 4,
             lacunarity: 2.0,
@@ -68,8 +74,8 @@ impl Default for TerrainConfig {
             warp_amplitude: 3.0,
             chunk_size: 160.0,
             resolution: 96,
-            view_radius_chunks: 6, // OPT-03: reduced from 8 -> 6 (~41% fewer potential resident chunks; was 8 for farther retention)
-            max_spawn_per_frame: 16, // spawn more chunks per frame to fill extended radius faster (was 8)
+            view_radius_chunks: 6,
+            max_spawn_per_frame: 16,
             macro_frequency: 0.0025,
             mountain_start: 0.62,
             mountain_end: 0.75,
@@ -82,60 +88,99 @@ impl Default for TerrainConfig {
             vegetation_per_chunk: 40,
             mountain_height: 10.0,
             valley_depth: 8.0,
-            // OPT-06 LOD defaults: chunk_size 160 => choose distances several chunk spans out
-            lod_mid_distance: 160.0 * 3.2, // ~3.2 chunks
-            lod_far_distance: 160.0 * 5.0, // 5 chunks
-            lod_mid_resolution: 48,        // half
-            lod_far_resolution: 24,        // quarter
+            lod_mid_distance: 160.0 * 3.2,
+            lod_far_distance: 160.0 * 5.0,
+            lod_mid_resolution: 48,
+            lod_far_resolution: 24,
+            heightmap_world_size: 2000.0, // 2 km
+            heightmap_max_height: 200.0,  // meters
+            heightmap_path: "assets/heightmaps/level1.png".to_string(),
         }
     }
 }
 
-/// Lightweight sampler that can evaluate heights deterministically.
+#[derive(Clone)]
+struct Heightmap {
+    width: u32,
+    height: u32,
+    // Red channel bytes only (row-major).
+    data_r: Arc<Vec<u8>>,
+}
+
+impl Heightmap {
+    fn load(path: &str) -> Self {
+        let img = image::open(path).expect(&format!("Failed to open heightmap {}", path)).to_rgb8();
+        let (w, h) = img.dimensions();
+        let raw = img.into_raw();
+        let mut red = Vec::with_capacity((w * h) as usize);
+        for i in (0..raw.len()).step_by(3) {
+            red.push(raw[i]); // red channel
+        }
+        info!("Heightmap loaded: {} ({} x {})", path, w, h);
+        Self {
+            width: w,
+            height: h,
+            data_r: Arc::new(red),
+        }
+    }
+
+    #[inline]
+    fn sample_red_linear(&self, u: f32, v: f32) -> f32 {
+        // u,v in pixel space (0..width-1, 0..height-1)
+        if u < 0.0 || v < 0.0 || u > (self.width - 1) as f32 || v > (self.height - 1) as f32 {
+            return 0.0;
+        }
+        let x0 = u.floor() as i32;
+        let z0 = v.floor() as i32;
+        let x1 = (x0 + 1).clamp(0, self.width as i32 - 1);
+        let z1 = (z0 + 1).clamp(0, self.height as i32 - 1);
+        let tx = u - x0 as f32;
+        let tz = v - z0 as f32;
+
+        let idx = |x: i32, z: i32| -> usize {
+            (z as u32 * self.width + x as u32) as usize
+        };
+
+        let r00 = self.data_r[idx(x0, z0)] as f32;
+        let r10 = self.data_r[idx(x1, z0)] as f32;
+        let r01 = self.data_r[idx(x0, z1)] as f32;
+        let r11 = self.data_r[idx(x1, z1)] as f32;
+
+        let a = r00 + (r10 - r00) * tx;
+        let b = r01 + (r11 - r01) * tx;
+        (a + (b - a) * tz) / 255.0
+    }
+}
+
+/// Heightmap-based sampler.
 #[derive(Resource, Clone)]
 pub struct TerrainSampler {
-    perlin: Perlin,
     pub cfg: TerrainConfig,
-    seed_offset: Vec2,
-    graph: NodeRef,
+    heightmap: Heightmap,
 }
 
 impl TerrainSampler {
     pub fn new(cfg: TerrainConfig) -> Self {
-        let sx = (cfg.seed.wrapping_mul(747796405) ^ 0xA5A5A5A5) as f32 * 0.00123;
-        let sz = (cfg.seed.wrapping_mul(2891336453) ^ 0x5A5A5A5A) as f32 * 0.00097;
-        let graph = build_terrain_graph(&cfg);
-        Self {
-            perlin: Perlin::new(cfg.seed),
-            cfg,
-            seed_offset: Vec2::new(sx, sz),
-            graph,
+        let hm = Heightmap::load(&cfg.heightmap_path);
+        Self { cfg, heightmap: hm }
+    }
+
+    fn sample_heightmap(&self, x: f32, z: f32) -> f32 {
+        // Interpret world (x,z) centered at (0,0). Range [-world_size/2, +world_size/2] maps to [0,1] across the heightmap.
+        let world_size = self.cfg.heightmap_world_size;
+        let nx = (x / world_size) + 0.5;
+        let nz = (z / world_size) + 0.5;
+        if nx < 0.0 || nx > 1.0 || nz < 0.0 || nz > 1.0 {
+            return 0.0;
         }
+        let u = nx * (self.heightmap.width - 1) as f32;
+        let v = nz * (self.heightmap.height - 1) as f32;
+        let h_norm = self.heightmap.sample_red_linear(u, v);
+        h_norm * self.cfg.heightmap_max_height * self.cfg.amplitude
     }
 
     pub fn height(&self, x: f32, z: f32) -> f32 {
-        let ctx = GraphContext {
-            perlin: &self.perlin,
-            cfg: &self.cfg,
-            seed_offset: self.seed_offset,
-        };
-        let base = self.graph.sample(x, z, &ctx);
-        let macro_v = self.macro_value(x, z);
-        let cfg = &self.cfg;
-        let smooth = |a: f32, b: f32, v: f32| {
-            if (b - a).abs() < 1e-6 {
-                return 0.0;
-            }
-            let mut t = ((v - a) / (b - a)).clamp(0.0, 1.0);
-            t = t * t * (3.0 - 2.0 * t);
-            t
-        };
-        let mountain_t = smooth(cfg.mountain_start, cfg.mountain_end, macro_v);
-        let valley_t = smooth(cfg.valley_end, cfg.valley_start, macro_v);
-        let relief_scale = 0.80 + 0.25 * mountain_t + 0.15 * valley_t;
-        let uplift = mountain_t.powf(1.15) * cfg.mountain_height;
-        let depress = valley_t.powf(1.05) * cfg.valley_depth;
-        (base * relief_scale + uplift - depress) * cfg.amplitude
+        self.sample_heightmap(x, z)
     }
 
     pub fn normal(&self, x: f32, z: f32) -> Vec3 {
@@ -148,12 +193,6 @@ impl TerrainSampler {
         let dx = h_l - h_r;
         let dz = h_d - h_u;
         Vec3::new(dx, 2.0 * d, dz).normalize_or_zero()
-    }
-
-    pub fn macro_value(&self, x: f32, z: f32) -> f32 {
-        let nx = (x + self.seed_offset.x) as f64 * self.cfg.macro_frequency;
-        let nz = (z + self.seed_offset.y) as f64 * self.cfg.macro_frequency;
-        (self.perlin.get([nx, nz]) as f32) * 0.5 + 0.5
     }
 }
 
@@ -168,7 +207,7 @@ pub fn sample_height_normal(x: f32, z: f32, sampler: &TerrainSampler) -> (f32, V
 #[derive(Component)]
 pub struct TerrainChunk {
     pub coord: IVec2,
-    pub res: u32, // OPT-06: store resolution used (for LOD stats)
+    pub res: u32,
 }
 
 #[derive(Resource, Default)]
@@ -197,7 +236,7 @@ struct ChunkBuildResult {
     max_h: f32,
     res: u32,
     step: f32,
-    create_collider: bool, // OPT-11: skip collider for far LOD chunks
+    create_collider: bool,
 }
 
 #[derive(Component)]
@@ -213,7 +252,6 @@ impl Plugin for TerrainPlugin {
             .add_systems(PreStartup, init_sampler)
             .insert_resource(LoadedChunks::default())
             .insert_resource(InProgressChunks::default())
-            // OPT-04: Global shared terrain material (batches all chunks into few draw calls)
             .insert_resource(TerrainGlobalMaterial::default())
             .add_systems(
                 Update,
@@ -236,14 +274,19 @@ fn apply_terrain_config_changes(
     if !cfg.is_changed() {
         return;
     }
-    // Rebuild terrain sampler & clear existing chunks if impactful params changed.
-    if cfg.amplitude != sampler.cfg.amplitude || cfg.view_radius_chunks != sampler.cfg.view_radius_chunks {
+    // Rebuild sampler if fundamental params changed (world size, heightmap path, amplitude, view radius).
+    if cfg.amplitude != sampler.cfg.amplitude
+        || cfg.view_radius_chunks != sampler.cfg.view_radius_chunks
+        || cfg.heightmap_world_size != sampler.cfg.heightmap_world_size
+        || cfg.heightmap_path != sampler.cfg.heightmap_path
+        || cfg.heightmap_max_height != sampler.cfg.heightmap_max_height
+    {
         for e in q_chunks.iter() {
             commands.entity(e).despawn_recursive();
         }
         loaded.map.clear();
         commands.insert_resource(TerrainSampler::new(cfg.as_ref().clone()));
-        info!("Terrain config changed: amplitude/view_radius -> clearing & regenerating terrain");
+        info!("Terrain config changed (heightmap related) -> clearing & regenerating terrain");
     }
 }
 
@@ -286,7 +329,6 @@ fn update_terrain_chunks(
         if spawned_this_frame >= cfg.max_spawn_per_frame {
             break;
         }
-        // OPT-06: Choose LOD resolution based on distance from player
         let chunk_world_center = Vec3::new(
             coord.x as f32 * cfg.chunk_size + cfg.chunk_size * 0.5,
             0.0,
@@ -300,7 +342,6 @@ fn update_terrain_chunks(
         } else {
             cfg.resolution
         };
-        // OPT-11: Only create physics collider for near & mid LOD; skip for far (reduces Rapier cost)
         let create_collider = chosen_res != cfg.lod_far_resolution;
         spawn_chunk_task(&mut commands, *coord, sampler.as_ref().clone(), chosen_res, create_collider);
         in_progress.set.insert(*coord);
@@ -331,7 +372,6 @@ fn spawn_chunk_task(commands: &mut Commands, coord: IVec2, sampler: TerrainSampl
         let mut positions: Vec<[f32; 3]> = Vec::with_capacity(verts_count);
         let mut normals: Vec<[f32; 3]> = Vec::with_capacity(verts_count);
         let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(verts_count);
-        // OPT-05: Removed per-vertex baked color buffer (now computed fully in shader; saves vertex bandwidth & build CPU).
         let mut heights: Vec<f32> = Vec::with_capacity(verts_count);
 
         let origin_x = coord.x as f32 * size;
@@ -369,8 +409,6 @@ fn spawn_chunk_task(commands: &mut Commands, coord: IVec2, sampler: TerrainSampl
                 positions.push([local_x, h, local_z]);
                 normals.push([n.x, n.y, n.z]);
                 uvs.push([i as f32 / res as f32, j as f32 / res as f32]);
-
-                // OPT-05: Removed baked vertex color generation (now derived in contour shader using world position & normals).
             }
         }
 
@@ -390,7 +428,6 @@ fn spawn_chunk_task(commands: &mut Commands, coord: IVec2, sampler: TerrainSampl
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-        // OPT-05: COLOR attribute omitted to reduce vertex size.
         mesh.insert_indices(bevy::render::mesh::Indices::U32(indices));
 
         ChunkBuildResult {
@@ -420,13 +457,10 @@ fn finalize_chunk_tasks(
         if let Some(result) = block_on(poll_once(&mut build.task)) {
             let coord = result.coord;
 
-            // OPT-04: Shared terrain material batching.
-            // Update global min/max; create material once; reuse for all chunks so they share a single material (reduces draw calls).
             if global_mat.min_h == 0.0 && global_mat.max_h == 0.0 && global_mat.handle.is_none() {
-                // sentinel not relied upon; real init below
+                // sentinel - no action
             }
             if global_mat.min_h == 0.0 && global_mat.handle.is_none() {
-                // initial assign large extremes
                 global_mat.min_h = f32::MAX;
                 global_mat.max_h = f32::MIN;
             }
@@ -436,10 +470,9 @@ fn finalize_chunk_tasks(
             if global_mat.handle.is_none() {
                 let (palette_arr, palette_len) = topo_palette();
                 let mut ext = ContourExtension::default();
-                // temporary; will be overwritten below with aggregated range
                 ext.data.min_height = result.min_h;
                 ext.data.max_height = result.max_h;
-                ext.data.interval = 1.6;
+                ext.data.interval = 10.0;
                 ext.data.thickness = 0.70;
                 ext.data.scroll_speed = 0.40;
                 ext.data.darken = 0.88;
@@ -456,7 +489,7 @@ fn finalize_chunk_tasks(
                 let handle = contour_mats.add(ExtendedMaterial { base, extension: ext });
                 global_mat.handle = Some(handle.clone());
                 if !global_mat.created_logged {
-                    info!("Terrain global material created (OPT-04 batching active)");
+                    info!("Terrain global material created (heightmap mode)");
                     global_mat.created_logged = true;
                 }
             }
