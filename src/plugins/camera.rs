@@ -22,8 +22,10 @@ impl Default for OrbitCameraState {
     fn default() -> Self {
         Self {
             yaw: 0.0,
-            pitch: 20f32.to_radians(),
-            radius: 22.0,
+            // Higher initial pitch for elevated vantage
+            pitch: 50f32.to_radians(),
+            // Larger default radius so camera starts farther and higher
+            radius: 55.0,
         }
     }
 }
@@ -40,7 +42,10 @@ pub struct OrbitCameraConfig {
     pub sens_pitch: f32,
     pub target_height_offset: f32,
     pub min_clearance: f32,
-    // Maximum linear speeds (units / second) for speed‑limited lerp (currently unused; immediate follow).
+    // Spring constants (higher = snappier)
+    pub follow_spring: f32,
+    pub camera_spring: f32,
+    // Legacy speed limits (still available, unused in spring mode)
     pub cam_max_speed: f32,
     pub target_max_speed: f32, // should be >= cam_max_speed (spec: 2x)
 }
@@ -48,15 +53,19 @@ pub struct OrbitCameraConfig {
 impl Default for OrbitCameraConfig {
     fn default() -> Self {
         Self {
-            pitch_min: (-10f32).to_radians(),
-            pitch_max: 65f32.to_radians(),
+            pitch_min: 5f32.to_radians(),
+            pitch_max: 85f32.to_radians(),
             radius_min: 4.0,
-            radius_max: 32.0,
+            radius_max: 100.0,
             zoom_speed: 1.0,
             sens_yaw: 0.005,
             sens_pitch: 0.005,
-            target_height_offset: 0.3,
+            // Raise follow point a bit so even low pitches keep camera higher
+            target_height_offset: 1.0,
             min_clearance: 1.0,
+            // Increased for tighter, faster convergence
+            follow_spring: 60.0,
+            camera_spring: 6.0,
             cam_max_speed: 20.0,
             target_max_speed: 40.0,
         }
@@ -66,14 +75,25 @@ impl Default for OrbitCameraConfig {
 /// Tracks smoothed follow target for camera (speed limited).
 #[derive(Resource)]
 pub struct CameraFollow {
-    pub smoothed_target: Vec3,
+    pub target: Vec3, // desired (raw) follow target (ball)
+    pub actual: Vec3, // smoothed (tweened) follow target
+    pub initialized: bool,
 }
 impl Default for CameraFollow {
     fn default() -> Self {
         Self {
-            smoothed_target: Vec3::ZERO,
+            target: Vec3::ZERO,
+            actual: Vec3::ZERO,
+            initialized: false,
         }
     }
+}
+
+#[derive(Resource, Default)]
+pub struct CameraActual {
+    pub target: Vec3, // desired camera position
+    pub actual: Vec3, // smoothed camera position
+    pub initialized: bool,
 }
 
 /// Tracks whether the cursor is currently locked for orbit control.
@@ -109,6 +129,7 @@ impl Plugin for CameraPlugin {
         app.insert_resource(OrbitCameraConfig::default())
             .insert_resource(OrbitCameraState::default())
             .insert_resource(CameraFollow::default())
+            .insert_resource(CameraActual::default())
             .insert_resource(OrbitCaptureState::default())
             .insert_resource(MenuCameraFlight::default())
             .add_systems(
@@ -117,6 +138,7 @@ impl Plugin for CameraPlugin {
                     orbit_camera_capture,
                     orbit_camera_input,
                     menu_camera_flight,
+                    camera_phase_transition,
                     orbit_camera_apply,
                 ),
             );
@@ -247,13 +269,36 @@ fn menu_camera_flight(
     cam_t.look_at(look_target, Vec3::Y);
 }
 
+fn camera_phase_transition(
+    phase: Option<Res<GamePhase>>,
+    mut last: Local<Option<GamePhase>>,
+    mut q_cam: Query<&mut Transform, With<OrbitCamera>>,
+    mut follow: ResMut<CameraFollow>,
+    mut actual: ResMut<CameraActual>,
+) {
+    let current = phase.map(|p| *p);
+    if current != *last {
+        if matches!(current, Some(GamePhase::Playing)) {
+            if let Ok(mut t) = q_cam.get_single_mut() {
+                // High-altitude initial spawn to show whole landscape
+                t.translation = Vec3::new(0.0, 1000.0, 0.0);
+            }
+            follow.initialized = false;
+            actual.initialized = false;
+        }
+        *last = current;
+    }
+}
+
 /// Apply gameplay camera follow with speed limits (position & target smoothing).
 fn orbit_camera_apply(
+    time: Res<Time>,
     state: Res<OrbitCameraState>,
     cfg: Res<OrbitCameraConfig>,
     sampler: Option<Res<TerrainSampler>>,
     phase: Option<Res<GamePhase>>,
     mut follow: ResMut<CameraFollow>,
+    mut actual: ResMut<CameraActual>,
     q_ball: Query<&Transform, With<Ball>>,
     mut q_cam: Query<&mut Transform, (With<OrbitCamera>, Without<Ball>)>,
 ) {
@@ -270,14 +315,31 @@ fn orbit_camera_apply(
     };
 
     let raw_target = ball_t.translation + Vec3::Y * cfg.target_height_offset;
+    follow.target = raw_target;
 
-    // Immediate target (no smoothing / perfect follow)
-    follow.smoothed_target = raw_target;
+    // Spring smoothing for follow target (magnetically attracted)
+    if !follow.initialized {
+        follow.actual = follow.target;
+        follow.initialized = true;
+    } else {
+        let dt = time.delta_seconds();
+        let k = cfg.follow_spring;
+        let alpha = 1.0 - (-k * dt).exp();
+        let target = follow.target;
+        let current = follow.actual;
+        follow.actual = current + (target - current) * alpha;
+    }
 
-    // Desired camera position (based on smoothed target)
-    let rot = Quat::from_rotation_y(state.yaw) * Quat::from_rotation_x(state.pitch);
-    let offset = rot * (Vec3::Z * state.radius);
-    let mut desired_pos = follow.smoothed_target + offset;
+    // Desired camera position (spherical from yaw/pitch so positive pitch raises camera)
+    // pitch in [0, ~pi/2]: 0 = horizontal, increasing -> higher
+    let yaw = state.yaw;
+    let pitch = state.pitch;
+    let dir = Vec3::new(
+        pitch.cos() * yaw.sin(),
+        pitch.sin(),
+        pitch.cos() * yaw.cos(),
+    );
+    let mut desired_pos = follow.actual + dir * state.radius;
 
     // Terrain clearance (optional)
     if let Some(s) = &sampler {
@@ -286,8 +348,20 @@ fn orbit_camera_apply(
             desired_pos.y = ground_y + cfg.min_clearance;
         }
     }
+    actual.target = desired_pos;
 
-    // Immediate camera position (no speed limit) so orientation & controls remain responsive.
-    cam_t.translation = desired_pos;
-    cam_t.look_at(follow.smoothed_target, Vec3::Y);
+    // Spring camera position toward desired target; keep initial high spawn for descent animation
+    if !actual.initialized {
+        actual.actual = cam_t.translation;
+        actual.initialized = true;
+    } else {
+        let dt = time.delta_seconds();
+        let k = cfg.camera_spring;
+        let alpha = 1.0 - (-k * dt).exp();
+        let target = actual.target;
+        let current = actual.actual;
+        actual.actual = current + (target - current) * alpha;
+    }
+    cam_t.translation = actual.actual;
+    cam_t.look_at(follow.actual, Vec3::Y);
 }
