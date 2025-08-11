@@ -12,6 +12,7 @@
 // The main HUD text (score/time) lives in hud.rs.
 
 use bevy::prelude::*;
+use bevy::input::touch::TouchInput;
 use crate::plugins::ball::{Ball, BallKinematic};
 use crate::plugins::camera::OrbitCamera;
 use crate::plugins::game_state::{ShotState, ShotConfig, ShotMode};
@@ -144,10 +145,70 @@ fn handle_shot_input(
     q_cam: Query<&Transform, (With<OrbitCamera>, Without<Ball>, Without<ShotIndicator>)>,
     mut q_indicators: Query<(&mut Transform, &mut Visibility, &ShotIndicatorDot), (With<ShotIndicator>, Without<Ball>, Without<OrbitCamera>)>,
     mut ev_shot: EventWriter<ShotFiredEvent>,
+    mut ev_touch: EventReader<TouchInput>,
+    touch_orbit: Option<Res<crate::plugins::camera::TouchOrbit>>,
 ) {
     let Ok((ball_t, mut kin)) = q_ball.get_single_mut() else { return; };
     let Ok(cam_t) = q_cam.get_single() else { return; };
 
+    // Touch handling (mobile)
+    for ev in ev_touch.read() {
+        match ev.phase {
+            bevy::input::touch::TouchPhase::Started => {
+                if state.mode == Idle && state.touch_id.is_none() {
+                    state.touch_id = Some(ev.id);
+                    state.mode = Charging;
+                    state.power = 0.0;
+                    state.rising = true;
+                    let indicator_origin = ball_t.translation + Vec3::Y * (kin.collider_radius * 0.5);
+                    for (mut t, mut vis, _) in &mut q_indicators {
+                        t.translation = indicator_origin;
+                        *vis = Visibility::Visible;
+                    }
+                }
+            }
+            bevy::input::touch::TouchPhase::Moved => {
+                // If this touch became a look (orbit) gesture, cancel charging.
+                if state.touch_id == Some(ev.id) {
+                    if let Some(to) = touch_orbit.as_ref() {
+                        if to.look_active {
+                            // Cancel shot charge
+                            state.mode = ShotMode::Idle;
+                            state.power = 0.0;
+                            state.touch_id = None;
+                            for (_, mut vis, _) in &mut q_indicators {
+                                *vis = Visibility::Hidden;
+                            }
+                        }
+                    }
+                }
+            }
+            bevy::input::touch::TouchPhase::Ended | bevy::input::touch::TouchPhase::Canceled => {
+                if state.touch_id == Some(ev.id) && state.mode == Charging {
+                    // Fire shot (same logic as mouse release)
+                    let cam_to_ball = (ball_t.translation - cam_t.translation).normalize_or_zero();
+                    let horiz = Vec3::new(cam_to_ball.x, 0.0, cam_to_ball.z).normalize_or_zero();
+                    let angle = cfg.up_angle_deg.to_radians();
+                    let dir = (horiz * angle.cos() + Vec3::Y * angle.sin()).normalize_or_zero();
+                    let power_scale = 0.25 + state.power * (2.0 - 0.25);
+                    let impulse = cfg.base_impulse * power_scale;
+                    kin.vel += dir * impulse;
+                    ev_shot.send(ShotFiredEvent { pos: ball_t.translation, power: power_scale });
+                    state.mode = ShotMode::Idle;
+                    state.power = 0.0;
+                    state.touch_id = None;
+                    for (_, mut vis, _) in &mut q_indicators {
+                        *vis = Visibility::Hidden;
+                    }
+                } else if state.touch_id == Some(ev.id) {
+                    // Just clear the touch id if not charging
+                    state.touch_id = None;
+                }
+            }
+        }
+    }
+
+    // Mouse input (desktop / browser with mouse)
     if buttons.just_pressed(MouseButton::Left) && state.mode == Idle {
         state.mode = Charging;
         state.power = 0.0;

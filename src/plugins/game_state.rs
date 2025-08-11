@@ -21,12 +21,13 @@ pub enum ShotMode {
 #[derive(Resource, Debug)]
 pub struct ShotState {
     pub mode: ShotMode,
-    pub power: f32,   // 0..1 (oscillating)
-    pub rising: bool, // triangle wave direction
+    pub power: f32,          // 0..1 (oscillating)
+    pub rising: bool,        // triangle wave direction
+    pub touch_id: Option<u64>, // active charging touch (mobile)
 }
 impl Default for ShotState {
     fn default() -> Self {
-        Self { mode: ShotMode::Idle, power: 0.0, rising: true }
+        Self { mode: ShotMode::Idle, power: 0.0, rising: true, touch_id: None }
     }
 }
 
