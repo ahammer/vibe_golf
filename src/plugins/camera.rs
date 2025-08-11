@@ -221,6 +221,7 @@ fn menu_camera_flight(
     sampler: Option<Res<TerrainSampler>>,
     mut q_cam: Query<&mut Transform, With<OrbitCamera>>,
 ) {
+    // Only active in menu.
     if !matches!(phase.map(|p| *p), Some(GamePhase::Menu)) {
         return;
     }
@@ -229,44 +230,49 @@ fn menu_camera_flight(
     };
 
     let dt = time.delta_seconds();
-    let t = {
-        flight.t += dt;
-        flight.t
-    };
+    flight.t += dt;
 
-    // Heading wander (layered low‑freq sines)
-    let wander = (t * 0.05).sin() * 0.35
-        + (t * 0.083).cos() * 0.18
-        + (t * 0.021).sin() * 0.12;
-    flight.heading += wander * dt;
-
-    // Forward velocity (gently varying)
-    let base_speed = 26.0;
-    let speed_variation = 6.0 * (t * 0.23).sin() + 3.0 * (t * 0.11).cos();
-    let speed = (base_speed + speed_variation).max(2.0);
-
-    // Advance position
-    let forward_flat = Vec3::new(flight.heading.cos(), 0.0, flight.heading.sin());
-    flight.pos += forward_flat * speed * dt;
-
-    // Vertical profile: base + bob + terrain follow
-    let bob = (t * 0.37).sin() * 3.0 + (t * 0.19).cos() * 1.2;
-    let mut desired_y = 18.0 + bob;
     if let Some(s) = &sampler {
-        let ground = s.height(flight.pos.x, flight.pos.z);
-        let terrain_clear = ground + 12.0; // keep ~12 units above terrain + bob
-        if desired_y < terrain_clear {
-            desired_y = terrain_clear;
-        }
+        // Heightmap spans [-world_size/2, +world_size/2] in both X & Z.
+        let world_size = s.cfg.heightmap_world_size;
+        let half = world_size * 0.5;
+
+        // Radius chosen to comfortably fit full island (diagonal ~ world_size * sqrt(2)).
+        // Extra padding factor so edges remain in frame.
+        let radius = half * 1.3; // e.g. 1000 * 1.3 = 1300
+
+        // Base altitude and gentle vertical bob.
+        let base_height = half * 0.8; // e.g. 800 for 2 km world
+        let bob = (flight.t * 0.15).sin() * 40.0 + (flight.t * 0.07).cos() * 25.0;
+        let y = base_height + bob;
+
+        // Constant angular velocity for smooth orbit (~60s per revolution).
+        let ang_speed = std::f32::consts::TAU / 60.0; // rad/sec
+        flight.heading = (flight.heading + ang_speed * dt) % std::f32::consts::TAU;
+
+        // Position on horizontal circle.
+        let x = radius * flight.heading.cos();
+        let z = radius * flight.heading.sin();
+        flight.pos = Vec3::new(x, y, z);
+
+        // Focus point: center of island slightly above ground for nicer composition.
+        let center_height = s.height(0.0, 0.0);
+        let focus = Vec3::new(0.0, center_height + 80.0, 0.0);
+
+        cam_t.translation = flight.pos;
+        cam_t.look_at(focus, Vec3::Y);
+    } else {
+        // Fallback (no sampler yet): simple slow spin at fixed params.
+        let ang_speed = std::f32::consts::TAU / 80.0;
+        flight.heading = (flight.heading + ang_speed * dt) % std::f32::consts::TAU;
+        let radius = 800.0;
+        let y = 600.0 + (flight.t * 0.2).sin() * 50.0;
+        let x = radius * flight.heading.cos();
+        let z = radius * flight.heading.sin();
+        flight.pos = Vec3::new(x, y, z);
+        cam_t.translation = flight.pos;
+        cam_t.look_at(Vec3::new(0.0, 80.0, 0.0), Vec3::Y);
     }
-    // Smooth Y toward desired to avoid abrupt jumps.
-    flight.pos.y = flight.pos.y.lerp(desired_y, (dt * 1.5).clamp(0.0, 1.0));
-
-    cam_t.translation = flight.pos;
-
-    // Look ahead along path with slight downward tilt.
-    let look_target = flight.pos + forward_flat * 60.0 + Vec3::new(0.0, -8.0, 0.0);
-    cam_t.look_at(look_target, Vec3::Y);
 }
 
 fn camera_phase_transition(
