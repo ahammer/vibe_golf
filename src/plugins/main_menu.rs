@@ -85,6 +85,22 @@ fn spawn_main_menu(
                 "Vibe Golf",
                 TextStyle { font: font.clone(), font_size: 56.0, color: Color::srgb(0.95, 0.95, 1.0) },
             ));
+            // Tutorial tagline
+            parent.spawn(
+                TextBundle::from_section(
+                    "Find the ducks as fast as you can",
+                    TextStyle { font: font.clone(), font_size: 28.0, color: Color::srgb(0.90, 0.90, 0.95) },
+                )
+                .with_style(Style { margin: UiRect::all(Val::Px(6.0)), ..default() }),
+            );
+            // Basic controls
+            parent.spawn(
+                TextBundle::from_section(
+                    "Left Click: Hold + release to shoot\nRight Click: Hold to orbit camera\nScroll Wheel: Zoom\nR: Restart after game over",
+                    TextStyle { font: font.clone(), font_size: 18.0, color: Color::srgb(0.70, 0.70, 0.75) },
+                )
+                .with_style(Style { margin: UiRect::all(Val::Px(4.0)), ..default() }),
+            );
             // Play Button
             spawn_button(
                 parent,
