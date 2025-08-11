@@ -172,8 +172,16 @@ fn detect_mobile_hint(
     mut ev_touch: EventReader<bevy::input::touch::TouchInput>,
     mut hint: ResMut<MobileHudHint>,
 ) {
-    if !hint.0 && ev_touch.iter().next().is_some() {
+    if hint.0 {
+        // Already detected
+        for _ in ev_touch.read() {
+            // drain
+        }
+        return;
+    }
+    for _ in ev_touch.read() {
         hint.0 = true;
+        break;
     }
 }
 

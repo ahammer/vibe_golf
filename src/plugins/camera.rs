@@ -270,7 +270,7 @@ fn orbit_camera_input(
                     touch_orbit.last_pos = ev.position;
                 }
             }
-            bevy::input::touch::TouchPhase::Ended | bevy::input::touch::TouchPhase::Cancelled => {
+            bevy::input::touch::TouchPhase::Ended | bevy::input::touch::TouchPhase::Canceled => {
                 if pinch.id1 == Some(ev.id) || pinch.id2 == Some(ev.id) {
                     // Reset pinch state completely
                     pinch.id1 = None;
