@@ -130,8 +130,8 @@ impl Default for VegetationConfig {
             threshold: 0.50,
             max_instances: 8000,
             min_slope_normal_y: 0.70,
-            scale_min: 5.0,
-            scale_max: 10.0,
+            scale_min: 0.5,
+            scale_max: 2.0,
             samples_per_frame: 700,
             batch_spawn_flush: 256,
             min_spacing_inner: 16.0,
@@ -140,9 +140,9 @@ impl Default for VegetationConfig {
             patch_noise_freq: 0.010,
             patch_contrast: 1.7,
             inner_cap: 140,
-            hero_chance: 0.04,
-            hero_scale_min_mul: 1.6,
-            hero_scale_max_mul: 2.4,
+            hero_chance: 0.0,
+            hero_scale_min_mul: 1.0,
+            hero_scale_max_mul: 1.0,
             tilt_max_deg: 7.0,
             use_instanced: true,
             debug_draw_calls: true,
@@ -414,17 +414,16 @@ fn build_transform(pos: Vec2, height: f32, rng: &mut impl Rng, cfg: &VegetationC
     let tilt_z = rng.gen_range(-tilt_max..tilt_max);
     let tilt = Quat::from_rotation_x(tilt_x) * Quat::from_rotation_z(tilt_z);
 
-    // Scale (with occasional hero enlargement)
+    // Scale (clamped to natural size range 0.5x .. 2x)
     let mut scale_base = rng.gen_range(cfg.scale_min..cfg.scale_max);
     if rng.gen_bool(cfg.hero_chance as f64) {
         scale_base *= rng.gen_range(cfg.hero_scale_min_mul..cfg.hero_scale_max_mul);
     }
-
-    let scale = Vec3::new(
-        scale_base * rng.gen_range(0.95..1.05),
-        scale_base * rng.gen_range(0.95..1.10),
-        scale_base * rng.gen_range(0.95..1.05),
-    );
+    scale_base = scale_base.clamp(cfg.scale_min, cfg.scale_max);
+    let sx = (scale_base * rng.gen_range(0.95..1.05)).clamp(cfg.scale_min, cfg.scale_max);
+    let sy = (scale_base * rng.gen_range(0.95..1.10)).clamp(cfg.scale_min, cfg.scale_max);
+    let sz = (scale_base * rng.gen_range(0.95..1.05)).clamp(cfg.scale_min, cfg.scale_max);
+    let scale = Vec3::new(sx, sy, sz);
 
     Transform {
         translation: Vec3::new(pos.x, height, pos.y),
