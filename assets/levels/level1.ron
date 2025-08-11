@@ -26,8 +26,8 @@
             amplitude: 0.6,
             bob_freq: 0.5,
             rot_speed: 0.4,
-            // Tripled hit box for easier hits
-            collider_radius: 9.0,
+            // Halved from 9.0 (was about 2x too large)
+            collider_radius: 4.5,
         ),
     ),
 
