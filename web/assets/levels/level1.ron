@@ -1,0 +1,52 @@
+(
+    // Raised for high starting vantage looking downward
+    camera_start: (x: -12.0, y: 60.0, z: 18.0),
+    camera_look_at: (x: 0.0, y: 0.5, z: 0.0),
+
+    sky: (
+        texture: "skymap/kloppenheim_06_puresky_1k.hdr",
+        radius: 4000.0, // large but within camera far (5000) so always rendered; appears at infinity without forcing huge far plane
+        longitudes: 64,
+        latitudes: 32,
+    ),
+
+    ball: (
+        model: "models/meatball.glb#Scene0",
+        pos: (x: 0.0, z: 0.0),
+        spawn_height_offset: 10.0,
+        collider_radius: 0.5,
+        visual_scale: 1.0,
+    ),
+
+    target: (
+        model: "models/ducky.glb#Scene0",
+        initial: (x: 0.0, z: 80.0),
+        float: (
+            // Reduced so target rests on ground (base_height == amplitude keeps min at ground)
+            base_height: 0.6,
+            amplitude: 0.6,
+            bob_freq: 0.5,
+            rot_speed: 0.4,
+            // Halved from 9.0 (was about 2x too large)
+            collider_radius: 4.5,
+        ),
+    ),
+
+    world: (
+        half_extent: 187.0,
+        wall_height: 120.0,
+        wall_fade_distance: 60.0,
+        wall_restitution: 0.6,
+        wall_color: (0.2, 0.5, 0.9, 0.0),
+    ),
+
+    shot: (
+        osc_speed: 1.6,
+        base_impulse: 18.0,
+        up_angle_deg: 45.0,
+    ),
+
+    scoring: (
+        max_holes: 5,
+    ),
+)

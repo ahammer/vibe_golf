@@ -27,6 +27,10 @@ use vibe_golf::plugins::{
 use vibe_golf::screenshot::{ScreenshotPlugin, ScreenshotConfig};
 
 fn main() {
+    // Better panic messages in the browser console when running under WebAssembly.
+    #[cfg(target_arch = "wasm32")]
+    console_error_panic_hook::set_once();
+
     let args: Vec<String> = std::env::args().collect();
     let screenshot_enabled = !args.iter().any(|a| a == "--no-screenshot");
     // Parse -runtime / --runtime flags (supports -runtime 30, --runtime 30, -runtime=30, --runtime=30)
@@ -54,7 +58,12 @@ fn main() {
         })
         .insert_resource(ScreenshotConfig::new(screenshot_enabled))
         .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window { title: "Vibe Golf".into(), ..default() }),
+            primary_window: Some(Window {
+                title: "Vibe Golf".into(),
+                #[cfg(target_arch = "wasm32")]
+                canvas: Some("#bevy-canvas".into()),
+                ..default()
+            }),
             ..default()
         }))
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())

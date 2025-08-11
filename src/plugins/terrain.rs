@@ -241,6 +241,7 @@ struct ChunkBuildResult {
 }
 
 #[derive(Component)]
+#[cfg(not(target_arch = "wasm32"))]
 struct ChunkBuildTask {
     coord: IVec2,
     task: Task<ChunkBuildResult>,
@@ -249,13 +250,17 @@ struct ChunkBuildTask {
 pub struct TerrainPlugin;
 impl Plugin for TerrainPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(TerrainConfig::default())
+        let app = app
+            .insert_resource(TerrainConfig::default())
             .add_systems(PreStartup, init_sampler)
             .insert_resource(LoadedChunks::default())
             .insert_resource(InProgressChunks::default())
             .insert_resource(TerrainGlobalMaterial::default())
-            .add_systems(Startup, spawn_water)
-            .add_systems(
+            .add_systems(Startup, spawn_water);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            app.add_systems(
                 Update,
                 (
                     update_terrain_chunks,
@@ -263,6 +268,18 @@ impl Plugin for TerrainPlugin {
                     apply_terrain_config_changes.after(finalize_chunk_tasks),
                 ),
             );
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            app.add_systems(
+                Update,
+                (
+                    update_terrain_chunks,
+                    apply_terrain_config_changes.after(update_terrain_chunks),
+                ),
+            );
+        }
     }
 }
 
@@ -342,6 +359,9 @@ fn update_terrain_chunks(
     mut commands: Commands,
     mut loaded: ResMut<LoadedChunks>,
     mut in_progress: ResMut<InProgressChunks>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut terrain_mats: ResMut<Assets<ExtendedMaterial<StandardMaterial, RealTerrainExtension>>>,
+    mut global_mat: ResMut<TerrainGlobalMaterial>,
     sampler: Res<TerrainSampler>,
     q_ball: Query<&Transform, With<Ball>>,
 ) {
@@ -387,11 +407,159 @@ fn update_terrain_chunks(
             cfg.resolution
         };
         let create_collider = chosen_res != cfg.lod_far_resolution;
-        spawn_chunk_task(&mut commands, *coord, sampler.as_ref().clone(), chosen_res, create_collider);
-        in_progress.set.insert(*coord);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            spawn_chunk_task(&mut commands, *coord, sampler.as_ref().clone(), chosen_res, create_collider);
+            in_progress.set.insert(*coord);
+        }
+
+        // On wasm build chunks synchronously (no AsyncComputeTaskPool multithreading)
+        #[cfg(target_arch = "wasm32")]
+        {
+            let res = chosen_res;
+            let size = cfg.chunk_size;
+            let step = size / res as f32;
+
+            let verts_count = ((res + 1) * (res + 1)) as usize;
+            let mut positions: Vec<[f32; 3]> = Vec::with_capacity(verts_count);
+            let mut normals: Vec<[f32; 3]> = Vec::with_capacity(verts_count);
+            let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(verts_count);
+            let mut heights: Vec<f32> = Vec::with_capacity(verts_count);
+
+            let origin_x_chunk = coord.x as f32 * size;
+            let origin_z_chunk = coord.y as f32 * size;
+
+            for j in 0..=res {
+                for i in 0..=res {
+                    let world_x = origin_x_chunk + i as f32 * step;
+                    let world_z = origin_z_chunk + j as f32 * step;
+                    heights.push(sampler.height(world_x, world_z));
+                }
+            }
+            let (min_h, max_h) =
+                heights.iter().fold((f32::MAX, f32::MIN), |(mn, mx), &h| (mn.min(h), mx.max(h)));
+
+            for j in 0..=res {
+                for i in 0..=res {
+                    let idx = (j * (res + 1) + i) as usize;
+                    let h = heights[idx];
+
+                    let i_l = if i == 0 { i } else { i - 1 };
+                    let i_r = if i == res { i } else { i + 1 };
+                    let j_d = if j == 0 { j } else { j - 1 };
+                    let j_u = if j == res { j } else { j + 1 };
+                    let h_l = heights[(j * (res + 1) + i_l) as usize];
+                    let h_r = heights[(j * (res + 1) + i_r) as usize];
+                    let h_d = heights[(j_d * (res + 1) + i) as usize];
+                    let h_u = heights[(j_u * (res + 1) + i) as usize];
+                    let dxn = h_l - h_r;
+                    let dzn = h_d - h_u;
+                    let n = Vec3::new(dxn, 2.0 * step, dzn).normalize_or_zero();
+
+                    let local_x = i as f32 * step;
+                    let local_z = j as f32 * step;
+                    positions.push([local_x, h, local_z]);
+                    normals.push([n.x, n.y, n.z]);
+                    uvs.push([i as f32 / res as f32, j as f32 / res as f32]);
+                }
+            }
+
+            let mut indices: Vec<u32> = Vec::with_capacity((res * res * 6) as usize);
+            for j in 0..res {
+                for i in 0..res {
+                    let row = res + 1;
+                    let i0 = j * row + i;
+                    let i1 = i0 + 1;
+                    let i2 = i0 + row;
+                    let i3 = i2 + 1;
+                    indices.extend_from_slice(&[i0, i2, i1, i1, i2, i3].map(|v| v as u32));
+                }
+            }
+
+            // Global material min/max update
+            if global_mat.min_h == 0.0 && global_mat.max_h == 0.0 && global_mat.handle.is_none() {
+                // sentinel
+            }
+            if global_mat.min_h == 0.0 && global_mat.handle.is_none() {
+                global_mat.min_h = f32::MAX;
+                global_mat.max_h = f32::MIN;
+            }
+            global_mat.min_h = global_mat.min_h.min(min_h);
+            global_mat.max_h = global_mat.max_h.max(max_h);
+
+            if global_mat.handle.is_none() {
+                let mut ext = RealTerrainExtension::default();
+                ext.data.min_height = min_h;
+                ext.data.max_height = max_h;
+                let base = StandardMaterial {
+                    base_color: Color::WHITE,
+                    perceptual_roughness: 0.85,
+                    metallic: 0.0,
+                    ..default()
+                };
+                let handle = terrain_mats.add(ExtendedMaterial { base, extension: ext });
+                global_mat.handle = Some(handle.clone());
+                if !global_mat.created_logged {
+                    info!("Terrain realistic material created (heightmap mode, wasm immediate)");
+                    global_mat.created_logged = true;
+                }
+            }
+            if let Some(handle) = &global_mat.handle {
+                if let Some(mat) = terrain_mats.get_mut(handle) {
+                    mat.extension.data.min_height = global_mat.min_h;
+                    mat.extension.data.max_height = global_mat.max_h;
+                }
+            }
+            let material = global_mat.handle.as_ref().unwrap().clone();
+
+            let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, Default::default());
+            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+            mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+            mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+            mesh.insert_indices(bevy::render::mesh::Indices::U32(indices));
+
+            let mesh_handle = meshes.add(mesh);
+
+            let origin_x = coord.x as f32 * res as f32 * step;
+            let origin_z = coord.y as f32 * res as f32 * step;
+
+            let mut ec = commands.spawn((
+                MaterialMeshBundle {
+                    mesh: mesh_handle,
+                    material,
+                    transform: Transform::from_translation(Vec3::new(origin_x, 0.0, origin_z)),
+                    ..default()
+                },
+                TerrainChunk { coord: *coord, res },
+            ));
+
+            if create_collider {
+                let nrows = (res + 1) as usize;
+                let ncols = (res + 1) as usize;
+                let collider = Collider::heightfield(
+                    heights,
+                    nrows,
+                    ncols,
+                    Vec3::new(step, 1.0, step),
+                );
+                ec.insert((
+                    RigidBody::Fixed,
+                    collider,
+                    Friction {
+                        coefficient: 1.0,
+                        combine_rule: CoefficientCombineRule::Average,
+                    },
+                ));
+            }
+
+            loaded.map.insert(*coord, ec.id());
+        }
+
         spawned_this_frame += 1;
     }
 
+    // Despawn out-of-range chunks
     let mut to_remove: Vec<IVec2> = Vec::new();
     for (coord, ent) in loaded.map.iter() {
         if (coord.x - center_chunk.x).abs() > radius || (coord.y - center_chunk.y).abs() > radius {
@@ -404,6 +572,7 @@ fn update_terrain_chunks(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn spawn_chunk_task(commands: &mut Commands, coord: IVec2, sampler: TerrainSampler, override_res: u32, create_collider: bool) {
     let task_pool = AsyncComputeTaskPool::get();
     let task = task_pool.spawn(async move {
@@ -488,6 +657,7 @@ fn spawn_chunk_task(commands: &mut Commands, coord: IVec2, sampler: TerrainSampl
     commands.spawn(ChunkBuildTask { coord, task });
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn finalize_chunk_tasks(
     mut commands: Commands,
     mut loaded: ResMut<LoadedChunks>,

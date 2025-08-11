@@ -1,0 +1,14 @@
+# Per-target configuration for WebAssembly builds.
+# Ensures getrandom selects the JS backend and enables SIMD128 for better performance in Bevy/WGPU.
+[target.wasm32-unknown-unknown]
+rustflags = [
+  "--cfg", "getrandom_backend=\"wasm_js\"",
+  "-C", "target-feature=+simd128"
+]
+
+# (Optional) Uncomment to reduce panic formatting further
+# rustflags = [
+#   "--cfg=getrandom_backend=\"wasm_js\"",
+#   "-C", "target-feature=+simd128",
+#   "-C", "panic=abort"
+# ]
