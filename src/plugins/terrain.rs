@@ -95,6 +95,7 @@ impl Default for TerrainConfig {
             lod_far_resolution: 24,
             heightmap_world_size: 2000.0, // 2 km
             heightmap_max_height: 200.0,  // meters
+            // Use a relative asset path. For wasm we embed the bytes directly (see Heightmap::load).
             heightmap_path: "assets/heightmaps/level1.png".to_string(),
         }
     }
@@ -110,6 +111,18 @@ struct Heightmap {
 
 impl Heightmap {
     fn load(path: &str) -> Self {
+        // For native builds, load from filesystem. For wasm, embed bytes at compile time
+        // (direct filesystem access and image::open(path) are not available in the browser).
+        #[cfg(target_arch = "wasm32")]
+        let img = {
+            // Path relative to this source file: ../../assets/heightmaps/level1.png
+            // (src/plugins/terrain.rs -> assets/heightmaps/level1.png)
+            let bytes = include_bytes!("../../assets/heightmaps/level1.png");
+            image::load_from_memory(bytes)
+                .unwrap_or_else(|_| panic!("Failed to decode embedded heightmap {}", path))
+                .to_rgb8()
+        };
+        #[cfg(not(target_arch = "wasm32"))]
         let img = image::open(path)
             .unwrap_or_else(|_| panic!("Failed to open heightmap {}", path))
             .to_rgb8();
