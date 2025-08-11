@@ -5,8 +5,6 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
 use bevy::asset::{AssetPlugin, AssetMode};
-#[cfg(target_arch = "wasm32")]
-use bevy_embedded_assets::EmbeddedAssetPlugin;
 
 use vibe_golf::plugins::{
     core_sim::{CoreSimPlugin, AutoConfig},
@@ -79,8 +77,6 @@ fn main() {
                 })
         );
 
-    #[cfg(target_arch = "wasm32")]
-    app.add_plugins(EmbeddedAssetPlugin::default());
 
     app.add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
         // Gameplay & rendering plugins (order preserved)
