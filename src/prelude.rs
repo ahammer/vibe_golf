@@ -22,6 +22,7 @@ pub use crate::plugins::vegetation::{
     VegetationPlugin, VegetationConfig, VegetationCullingConfig, VegetationLodConfig,
 };
 pub use crate::plugins::contour_material::ContourMaterialPlugin;
+pub use crate::plugins::terrain_material::TerrainMaterialPlugin;
 
 /// Presentation / UX
 pub use crate::plugins::hud::{HudPlugin, Hud};

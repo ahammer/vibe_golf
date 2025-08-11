@@ -6,7 +6,7 @@ use bevy::render::alpha::AlphaMode;
 use std::collections::{HashMap, HashSet};
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use futures_lite::future::{block_on, poll_once};
-use crate::plugins::contour_material::{ContourExtension, topo_palette};
+use crate::plugins::terrain_material::RealTerrainExtension;
 use crate::plugins::ball::Ball;
 use std::sync::Arc;
 
@@ -223,7 +223,7 @@ pub struct InProgressChunks {
 
 #[derive(Resource, Default)]
 struct TerrainGlobalMaterial {
-    handle: Option<Handle<ExtendedMaterial<StandardMaterial, ContourExtension>>>,
+    handle: Option<Handle<ExtendedMaterial<StandardMaterial, RealTerrainExtension>>>,
     min_h: f32,
     max_h: f32,
     created_logged: bool,
@@ -493,7 +493,7 @@ fn finalize_chunk_tasks(
     mut loaded: ResMut<LoadedChunks>,
     mut in_progress: ResMut<InProgressChunks>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut contour_mats: ResMut<Assets<ExtendedMaterial<StandardMaterial, ContourExtension>>>,
+    mut terrain_mats: ResMut<Assets<ExtendedMaterial<StandardMaterial, RealTerrainExtension>>>,
     mut global_mat: ResMut<TerrainGlobalMaterial>,
     mut q_tasks: Query<(Entity, &mut ChunkBuildTask)>,
 ) {
@@ -512,33 +512,24 @@ fn finalize_chunk_tasks(
             global_mat.max_h = global_mat.max_h.max(result.max_h);
 
             if global_mat.handle.is_none() {
-                let (palette_arr, palette_len) = topo_palette();
-                let mut ext = ContourExtension::default();
+                let mut ext = RealTerrainExtension::default();
                 ext.data.min_height = result.min_h;
                 ext.data.max_height = result.max_h;
-                ext.data.interval = 10.0;
-                ext.data.thickness = 0.70;
-                ext.data.scroll_speed = 0.40;
-                ext.data.darken = 0.88;
-                ext.data.palette_len = palette_len;
-                for i in 0..palette_len as usize {
-                    ext.data.colors[i] = palette_arr[i];
-                }
                 let base = StandardMaterial {
                     base_color: Color::WHITE,
-                    perceptual_roughness: 0.9,
+                    perceptual_roughness: 0.85,
                     metallic: 0.0,
                     ..default()
                 };
-                let handle = contour_mats.add(ExtendedMaterial { base, extension: ext });
+                let handle = terrain_mats.add(ExtendedMaterial { base, extension: ext });
                 global_mat.handle = Some(handle.clone());
                 if !global_mat.created_logged {
-                    info!("Terrain global material created (heightmap mode)");
+                    info!("Terrain realistic material created (heightmap mode)");
                     global_mat.created_logged = true;
                 }
             }
             if let Some(handle) = &global_mat.handle {
-                if let Some(mat) = contour_mats.get_mut(handle) {
+                if let Some(mat) = terrain_mats.get_mut(handle) {
                     mat.extension.data.min_height = global_mat.min_h;
                     mat.extension.data.max_height = global_mat.max_h;
                 }

@@ -19,7 +19,7 @@ use vibe_golf::plugins::{
     vegetation::VegetationPlugin,
     particles::ParticlePlugin,
     game_audio::GameAudioPlugin,
-    contour_material::ContourMaterialPlugin,
+    terrain_material::TerrainMaterialPlugin,
     main_menu::MainMenuPlugin,
     performance_menu::PerformanceMenuPlugin,
 };
@@ -60,7 +60,7 @@ fn main() {
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
         // Gameplay & rendering plugins (order preserved)
         .add_plugins(CoreSimPlugin)         // timing + shared resources
-        .add_plugins(ContourMaterialPlugin) // custom contour material (shader)
+        .add_plugins(TerrainMaterialPlugin) // realistic terrain material (shader)
         .add_plugins(TerrainPlugin)         // procedural terrain
         .add_plugins(VegetationPlugin)      // procedural vegetation (trees)
         .add_plugins(ParticlePlugin)        // particle & FX systems
