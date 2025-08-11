@@ -116,6 +116,12 @@ async function initWasm() {
     await init();
     loading.style.display = 'none';
   } catch (e) {
+    const msg = (e && e.message) ? e.message : String(e);
+    if (msg.includes("Using exceptions for control flow")) {
+      console.warn("Ignoring benign wgpu control-flow exception (expected internal wgpu wasm exception).");
+      loading.style.display = 'none';
+      return;
+    }
     showError(e);
   }
 }
