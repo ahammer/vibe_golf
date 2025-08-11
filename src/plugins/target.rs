@@ -96,14 +96,26 @@ pub fn detect_target_hits(
     let mut rng = rand::thread_rng();
     float.phase = rng.gen_range(0.0..std::f32::consts::TAU);
 
-    let dist = rng.gen_range(500.0..800.0);
-    let angle = rng.gen_range(0.0..std::f32::consts::TAU);
+    // Reposition target ensuring it does not spawn below minimum ground elevation.
+    const MIN_TARGET_GROUND: f32 = 50.0;
     let base_x = target_t.translation.x;
     let base_z = target_t.translation.z;
-    let new_x = base_x + dist * angle.cos();
-    let new_z = base_z + dist * angle.sin();
-
-    let ground = sampler.height(new_x, new_z);
+    let mut chosen: Option<(f32, f32, f32)> = None;
+    for _ in 0..40 {
+        let dist = rng.gen_range(500.0..800.0);
+        let angle = rng.gen_range(0.0..std::f32::consts::TAU);
+        let cand_x = base_x + dist * angle.cos();
+        let cand_z = base_z + dist * angle.sin();
+        let g = sampler.height(cand_x, cand_z);
+        if g >= MIN_TARGET_GROUND {
+            chosen = Some((cand_x, cand_z, g));
+            break;
+        }
+    }
+    let (new_x, new_z, ground) = chosen.unwrap_or_else(|| {
+        let g = sampler.height(base_x, base_z);
+        (base_x, base_z, g)
+    });
     float.ground = ground;
     float.base_height = params.base_height + params.visual_offset;
     float.amplitude = params.amplitude;

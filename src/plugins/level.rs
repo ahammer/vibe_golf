@@ -4,6 +4,7 @@ use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use serde::Deserialize;
 use std::fs;
+use rand::Rng;
 
 use crate::plugins::camera::OrbitCamera;
 use crate::plugins::ball::{Ball, BallKinematic};
@@ -184,9 +185,27 @@ fn spawn_level(
     // Ball is spawned lazily when entering gameplay phase (see spawn_runtime_ball).
 
     // Target spawn + params resource
-    let t_x = level.target.initial.x;
-    let t_z = level.target.initial.z;
-    let t_ground = sampler.height(t_x, t_z);
+    const MIN_TARGET_GROUND: f32 = 50.0;
+    let mut t_x = level.target.initial.x;
+    let mut t_z = level.target.initial.z;
+    let mut t_ground = sampler.height(t_x, t_z);
+    if t_ground < MIN_TARGET_GROUND {
+        let mut rng = rand::thread_rng();
+        for _ in 0..80 {
+            let dist = rng.gen_range(500.0..800.0);
+            let angle = rng.gen_range(0.0..std::f32::consts::TAU);
+            let cand_x = t_x + dist * angle.cos();
+            let cand_z = t_z + dist * angle.sin();
+            let g = sampler.height(cand_x, cand_z);
+            if g >= MIN_TARGET_GROUND {
+                t_x = cand_x;
+                t_z = cand_z;
+                t_ground = g;
+                break;
+            }
+        }
+        // If still below, leave position (will be below threshold but unavoidable); do not force floating
+    }
     let phase = rand::random::<f32>() * std::f32::consts::TAU;
     let initial_y = t_ground + level.target.float.base_height + level.target.float.amplitude * phase.sin();
     commands.insert_resource(TargetParams {

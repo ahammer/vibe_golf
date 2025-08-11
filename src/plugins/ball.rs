@@ -33,6 +33,18 @@ fn ball_physics(
     kin.vel.y += g * dt;
     t.translation += kin.vel * dt;
 
+    // Water respawn: if ball falls below water plane (y = 25), reset to origin.
+    const WATER_LEVEL: f32 = 25.0;
+    if t.translation.y < WATER_LEVEL {
+        t.translation.x = 0.0;
+        t.translation.z = 0.0;
+        let ground = sampler.height(0.0, 0.0);
+        t.translation.y = ground + kin.collider_radius;
+        kin.vel = Vec3::ZERO;
+        kin.angular_vel = Vec3::ZERO;
+        return;
+    }
+
     // Removed world boundary bounce (open world)
 
     // Terrain interaction

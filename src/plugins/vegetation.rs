@@ -652,6 +652,7 @@ fn progressive_spawn_trees(
     if state.finished {
         return;
     }
+    const MIN_TREE_GROUND: f32 = 50.0;
 
     let mut rng = thread_rng();
     let total_points = state.points.len();
@@ -710,6 +711,10 @@ fn progressive_spawn_trees(
 
         // Surface sample (expensive)
         let (h, n) = sample_surface(&sampler, p);
+        // Reject below minimum allowed ground elevation.
+        if h < MIN_TREE_GROUND {
+            continue;
+        }
         let s_mask = slope_mask(n, cfg.min_slope_normal_y);
         if s_mask <= 0.0 {
             state.slope_rejects += 1;
