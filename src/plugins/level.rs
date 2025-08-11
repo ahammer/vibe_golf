@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use serde::Deserialize;
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs;
 use rand::Rng;
 
@@ -112,18 +113,32 @@ impl Plugin for LevelPlugin {
 
 fn load_level(mut commands: Commands) {
     // Hard-coded single level for now.
-    let path = "assets/levels/level1.ron";
-    if let Ok(data) = fs::read_to_string(path) {
-        match ron::from_str::<LevelDef>(&data) {
-            Ok(def) => {
-                commands.insert_resource(def);
-            }
-            Err(e) => {
-                error!("Failed to parse {path}: {e}");
-            }
+    #[cfg(target_arch = "wasm32")]
+    {
+        // Embed the level definition at compile time for web (no filesystem access in browser).
+        let data = include_str!("../../assets/levels/level1.ron");
+        match ron::from_str::<LevelDef>(data) {
+            Ok(def) => commands.insert_resource(def),
+            Err(e) => error!("Failed to parse embedded level: {e}"),
         }
-    } else {
-        error!("Failed to read level file {path}");
+        return;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let path = "assets/levels/level1.ron";
+        if let Ok(data) = fs::read_to_string(path) {
+            match ron::from_str::<LevelDef>(&data) {
+                Ok(def) => {
+                    commands.insert_resource(def);
+                }
+                Err(e) => {
+                    error!("Failed to parse {path}: {e}");
+                }
+            }
+        } else {
+            error!("Failed to read level file {path}");
+        }
     }
 }
 
