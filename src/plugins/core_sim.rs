@@ -23,6 +23,9 @@ impl SimState {
 
 #[derive(Resource)]
 pub struct AutoConfig {
+    // If exit_enabled is false the game will not auto-exit (normal interactive play).
+    // When set via -runtime flag exit_enabled=true and run_duration_seconds is respected.
+    pub exit_enabled: bool,
     pub run_duration_seconds: f32,
     pub swing_interval_seconds: f32,
     pub base_impulse: f32,
@@ -30,7 +33,13 @@ pub struct AutoConfig {
 }
 impl Default for AutoConfig {
     fn default() -> Self {
-        Self { run_duration_seconds: 20.0, swing_interval_seconds: 3.0, base_impulse: 6.0, upward_factor: 0.0 }
+        Self {
+            exit_enabled: false,
+            run_duration_seconds: 20.0,
+            swing_interval_seconds: 3.0,
+            base_impulse: 6.0,
+            upward_factor: 0.0,
+        }
     }
 }
 
@@ -87,7 +96,7 @@ fn exit_after_runtime(
     q_chunks: Query<&TerrainChunk>,
 ) {
     if exit_state.triggered { return; }
-    if sim.elapsed_seconds >= auto.run_duration_seconds {
+    if auto.exit_enabled && sim.elapsed_seconds >= auto.run_duration_seconds {
         // OPT instrumentation: one-time final stats summary (chunks, trees, batches)
         let chunk_count = loaded_chunks.as_ref().map(|lc| lc.map.len()).unwrap_or(0);
         let mut unique: HashSet<(Handle<Mesh>, Handle<StandardMaterial>, bool)> = HashSet::new();

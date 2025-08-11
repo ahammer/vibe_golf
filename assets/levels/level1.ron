@@ -13,8 +13,8 @@
         model: "models/meatball.glb#Scene0",
         pos: (x: 0.0, z: 0.0),
         spawn_height_offset: 10.0,
-        collider_radius: 1.25,
-        visual_scale: 0.5,
+        collider_radius: 0.5,
+        visual_scale: 1.0,
     ),
 
     target: (

@@ -30,20 +30,22 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let screenshot_enabled = !args.iter().any(|a| a == "--no-screenshot");
     // Parse -runtime / --runtime flags (supports -runtime 30, --runtime 30, -runtime=30, --runtime=30)
-    let mut runtime_seconds: Option<f32> = None;
+    // Also detect whether the flag was supplied to enable auto-exit behavior.
+    let mut runtime_flag: Option<f32> = None;
     for (i, a) in args.iter().enumerate() {
         if a == "-runtime" || a == "--runtime" {
             if let Some(val) = args.get(i + 1) {
-                if let Ok(f) = val.parse::<f32>() { runtime_seconds = Some(f); }
+                if let Ok(f) = val.parse::<f32>() { runtime_flag = Some(f); }
             }
         } else if let Some(stripped) = a.strip_prefix("-runtime=").or_else(|| a.strip_prefix("--runtime=")) {
-            if let Ok(f) = stripped.parse::<f32>() { runtime_seconds = Some(f); }
+            if let Ok(f) = stripped.parse::<f32>() { runtime_flag = Some(f); }
         }
     }
-    let runtime_seconds = runtime_seconds.unwrap_or(20.0);
+    let exit_enabled = runtime_flag.is_some();
+    let runtime_seconds = runtime_flag.unwrap_or(20.0);
 
     App::new()
-        .insert_resource(AutoConfig { run_duration_seconds: runtime_seconds, ..Default::default() })
+        .insert_resource(AutoConfig { exit_enabled, run_duration_seconds: runtime_seconds, ..Default::default() })
         .insert_resource(ClearColor(Color::srgb(0.52, 0.80, 0.92)))
         .insert_resource(Msaa::Sample4)
         .insert_resource(AmbientLight {
