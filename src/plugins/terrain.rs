@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 use bevy::render::mesh::PrimitiveTopology;
 use bevy::pbr::{ExtendedMaterial, StandardMaterial};
+use bevy::render::alpha::AlphaMode;
 use std::collections::{HashMap, HashSet};
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use futures_lite::future::{block_on, poll_once};
@@ -253,6 +254,7 @@ impl Plugin for TerrainPlugin {
             .insert_resource(LoadedChunks::default())
             .insert_resource(InProgressChunks::default())
             .insert_resource(TerrainGlobalMaterial::default())
+            .add_systems(Startup, spawn_water)
             .add_systems(
                 Update,
                 (
@@ -292,6 +294,48 @@ fn apply_terrain_config_changes(
 
 fn init_sampler(mut commands: Commands, cfg: Res<TerrainConfig>) {
     commands.insert_resource(TerrainSampler::new(cfg.clone()));
+}
+
+// Spawn a very large water plane at a fixed elevation (y = 25).
+fn spawn_water(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let size = 5000.0; // Large enough to appear "infinite" within gameplay area
+    // Manually build a large quad for water (since shape::Plane not available).
+    let half = size * 0.5;
+    let positions: Vec<[f32; 3]> = vec![
+        [-half, 0.0, -half],
+        [ half, 0.0, -half],
+        [-half, 0.0,  half],
+        [ half, 0.0,  half],
+    ];
+    let normals: Vec<[f32; 3]> = vec![[0.0, 1.0, 0.0]; 4];
+    let uvs: Vec<[f32; 2]> = vec![[0.0, 0.0],[1.0,0.0],[0.0,1.0],[1.0,1.0]];
+    let indices: Vec<u32> = vec![0,2,1, 1,2,3];
+
+    let mut water_mesh = Mesh::new(PrimitiveTopology::TriangleList, Default::default());
+    water_mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    water_mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    water_mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    water_mesh.insert_indices(bevy::render::mesh::Indices::U32(indices));
+
+    let mesh_handle = meshes.add(water_mesh);
+    let material = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.05, 0.25, 0.6, 0.7),
+        perceptual_roughness: 0.05,
+        metallic: 0.0,
+        reflectance: 0.8,
+        alpha_mode: AlphaMode::Blend,
+        ..default()
+    });
+    commands.spawn(PbrBundle {
+        mesh: mesh_handle,
+        material,
+        transform: Transform::from_translation(Vec3::new(0.0, 25.0, 0.0)),
+        ..default()
+    });
 }
 
 fn update_terrain_chunks(
