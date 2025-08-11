@@ -1,0 +1,796 @@
+@@@ d1fe791|2025-08-08|initial command
+4706	0	Cargo.lock
+8	0	Cargo.toml
+30	0	README.md
+-	-	assets/fonts/FiraSans-Bold.ttf
+152	0	game_design.md
+158	0	src/main.rs
+
+@@@ 32b50d8|2025-08-08|built architect doc
+260	0	architecture.md
+43	15	src/main.rs
+
+@@@ 452c599|2025-08-08|some tracking/ball work
+91	0	.github/copilot-instructions.md
+107	30	src/main.rs
+
+@@@ 9429b03|2025-08-08|updating designs/context/settings
+30	0	.vscode/settings.json
+4	149	game_design.md
+178	0	stories.md
+
+@@@ 6ebe90a|2025-08-08|clean up
+1	0	.gitignore
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+19	2	src/main.rs
+80	0	src/screenshot.rs
+1	12	stories.md
+
+@@@ 60f305d|2025-08-08|working kind of
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+46	28	src/main.rs
+21	2	src/screenshot.rs
+
+@@@ 70b7200|2025-08-08|it runs
+-	-	screenshots/first_frame.png
+23	278	src/main.rs
+68	0	src/plugins/autoplay.rs
+32	0	src/plugins/camera.rs
+50	0	src/plugins/core_sim.rs
+23	0	src/plugins/hud.rs
+92	0	src/plugins/scene.rs
+2	2	src/screenshot.rs
+2	11	stories.md
+
+@@@ 740e9f2|2025-08-08|wip
+-	-	screenshots/first_frame.png
+12	0	src/lib.rs
+7	0	src/prelude.rs
+2	2	src/screenshot.rs
+26	0	tests/fixed_tick.rs
+
+@@@ 744ff01|2025-08-08|move to procedural generation
+172	95	stories.md
+
+@@@ 6d32ae4|2025-08-08|shows a landscape
+91	3	Cargo.lock
+1	0	Cargo.toml
+-	-	screenshots/first_frame.png
+1	0	src/lib.rs
+3	0	src/main.rs
+13	1	src/plugins/camera.rs
+5	13	src/plugins/scene.rs
+213	0	src/plugins/terrain.rs
+
+@@@ 516f975|2025-08-08|kind of running better?
+1	1	src/main.rs
+16	2	src/plugins/core_sim.rs
+5	2	src/plugins/scene.rs
+18	33	src/plugins/terrain.rs
+
+@@@ c4ae84d|2025-08-08|smoother
+3	1	src/main.rs
+2	4	src/plugins/scene.rs
+1	1	src/plugins/terrain.rs
+
+@@@ 045daa4|2025-08-08|dropping through the landscape
+-	-	screenshots/first_frame.png
+1	1	src/main.rs
+7	8	src/plugins/scene.rs
+
+@@@ a28b83e|2025-08-08|better ball
+-	-	screenshots/first_frame.png
+0	1	src/main.rs
+4	5	src/plugins/hud.rs
+28	3	src/plugins/scene.rs
+
+@@@ 9aa53ba|2025-08-08|much better
+-	-	screenshots/first_frame.png
+60	9	src/plugins/scene.rs
+
+@@@ b4e0a0b|2025-08-08|terrain now filling and ball falling
+-	-	screenshots/first_frame.png
+1	2	src/plugins/scene.rs
+6	4	src/plugins/terrain.rs
+
+@@@ f78da0a|2025-08-08|bigger terrain
+-	-	screenshots/first_frame.png
+56	13	src/plugins/terrain.rs
+
+@@@ 663349c|2025-08-08|improvements to gfx
+5	0	src/main.rs
+7	3	src/plugins/scene.rs
+
+@@@ 7cfb1c6|2025-08-08|clean up priorities
+157	203	stories.md
+
+@@@ 91dfc72|2025-08-09|some inputs
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+111	29	src/plugins/camera.rs
+10	12	src/plugins/scene.rs
+1	1	src/prelude.rs
+
+@@@ 430900c|2025-08-09|much better
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+28	1	src/plugins/camera.rs
+2	2	src/plugins/terrain.rs
+
+@@@ 4c3e9f6|2025-08-09|looking much better
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+17	4	src/plugins/scene.rs
+
+@@@ 76cd454|2025-08-09|now with shooting
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+215	16	src/plugins/scene.rs
+
+@@@ 77e1887|2025-08-09|added a skymap, basic gameplay working
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+-	-	skymap/citrus_orchard_puresky_4k.exr
+40	1	src/plugins/scene.rs
+
+@@@ d487763|2025-08-09|skymap
+1	1	Cargo.toml
+-	-	{skymap => assets/skymap}/citrus_orchard_puresky_4k.exr
+-	-	assets/skymap/kloppenheim_06_puresky_1k.hdr
+-	-	assets/skymap/kloppenheim_06_puresky_4k.hdr
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+17	0	src/plugins/scene.rs
+
+@@@ 80cb729|2025-08-09|HDRI now in there
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+56	3	src/plugins/scene.rs
+
+@@@ 5c6d62e|2025-08-09|full game
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+28	2	src/plugins/hud.rs
+61	2	src/plugins/scene.rs
+3	30	stories.md
+
+@@@ 7c01137|2025-08-09|improvements
+1	0	high_score_time.txt
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+9	1	src/plugins/core_sim.rs
+4	3	src/plugins/hud.rs
+44	2	src/plugins/scene.rs
+
+@@@ df4ff21|2025-08-09|particles
+17	1	Cargo.lock
+1	0	Cargo.toml
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+1	0	src/lib.rs
+3	0	src/main.rs
+351	0	src/plugins/particles.rs
+16	0	src/plugins/scene.rs
+1	0	src/prelude.rs
+
+@@@ fd6ddda|2025-08-09|audio working
+59	0	Cargo.lock
+1	1	Cargo.toml
+-	-	assets/audio/bounce.mp3
+-	-	assets/audio/game_over.mp3
+-	-	assets/audio/hit.mp3
+-	-	assets/audio/launch.mp3
+-	-	assets/audio/music.mp3
+51	0	convert_mp3_to_ogg.ps1
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+3	0	src/main.rs
+125	0	src/plugins/game_audio.rs
+8	1	src/plugins/particles.rs
+4	1	src/plugins/scene.rs
+
+@@@ 60cf285|2025-08-09|more colors
+13	2	src/plugins/game_audio.rs
+4	1	src/plugins/particles.rs
+110	58	src/plugins/scene.rs
+22	1	src/plugins/terrain.rs
+
+@@@ 3b575db|2025-08-09|clean up
+96	0	assets/shaders/contour.wgsl
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+2	0	src/lib.rs
+3	0	src/main.rs
+103	0	src/plugins/contour_material.rs
+61	20	src/plugins/terrain.rs
+
+@@@ f0739dc|2025-08-09|shadows back
+106	0	assets/shaders/contour_ext.wgsl
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+27	41	src/plugins/contour_material.rs
+20	13	src/plugins/terrain.rs
+
+@@@ 2c8236e|2025-08-09|update with walls
+9	0	assets/shaders/contour_ext.wgsl
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+9	8	src/plugins/contour_material.rs
+38	2	src/plugins/terrain.rs
+
+@@@ 47f86ec|2025-08-09|terrain graph system
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+1	0	src/lib.rs
+1	0	src/main.rs
+12	71	src/plugins/terrain.rs
+201	0	src/plugins/terrain_graph.rs
+
+@@@ 7dedbe8|2025-08-09|better camera
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+8	3	src/plugins/camera.rs
+4	0	src/plugins/scene.rs
+
+@@@ b50d56c|2025-08-09|added models
+-	-	assets/models/candy_1.glb
+-	-	assets/models/candy_2.glb
+-	-	assets/models/ducky.glb
+-	-	assets/models/meatball.glb
+-	-	assets/models/tree_1.glb
+-	-	assets/models/tree_2.glb
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+
+@@@ 880cbad|2025-08-09|nice, meshes work (but need scaling and placement)
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+80	84	src/plugins/particles.rs
+30	34	src/plugins/scene.rs
+
+@@@ f771171|2025-08-09|candy collisions have gravity
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+14	2	src/plugins/particles.rs
+
+@@@ 7c98d3f|2025-08-09|meatballs and explosions
+-	-	assets/models/ducky.glb
+-	-	assets/models/meatball.glb
+-	-	screenshots/first_frame.png
+15	13	src/plugins/particles.rs
+3	2	src/plugins/scene.rs
+
+@@@ ab3d6c6|2025-08-09|bigger ducky, no collision yet
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+63	14	src/plugins/scene.rs
+
+@@@ 45a6579|2025-08-09|contour lines look better
+4	4	assets/shaders/contour_ext.wgsl
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+3	3	src/plugins/terrain.rs
+
+@@@ 617cce7|2025-08-09|more poofs
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+65	1	src/plugins/particles.rs
+36	12	src/plugins/scene.rs
+
+@@@ 107a776|2025-08-09|great
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+1	0	src/lib.rs
+3	0	src/main.rs
+1	1	src/plugins/terrain.rs
+148	0	src/plugins/vegetation.rs
+
+@@@ 3da15d0|2025-08-09|this looks good now
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+161	117	src/plugins/vegetation.rs
+
+@@@ 0ac4aa4|2025-08-09|optimization
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+113	20	src/plugins/vegetation.rs
+
+@@@ 881d8d4|2025-08-09|clean up
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+203	139	src/plugins/vegetation.rs
+
+@@@ 9b59f38|2025-08-09|optimized
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+252	35	src/plugins/vegetation.rs
+
+@@@ 15d44dc|2025-08-09|updates
+-	-	screenshots/first_frame.png
+103	20	src/plugins/vegetation.rs
+
+@@@ 3055394|2025-08-09|optimizing
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+111	10	src/plugins/vegetation.rs
+
+@@@ 9679730|2025-08-09|gpu driving particles
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+255	113	src/plugins/particles.rs
+
+@@@ 5778c96|2025-08-09|improvements to the shot indicator
+-	-	assets/models/snowflake.glb
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+63	46	src/plugins/scene.rs
+
+@@@ b40f5cf|2025-08-09|walls
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+88	0	src/plugins/scene.rs
+
+@@@ f03de43|2025-08-09|better wall
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+31	14	src/plugins/scene.rs
+
+@@@ 1915342|2025-08-09|clean up
+2	0	Cargo.lock
+2	0	Cargo.toml
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+194	0	src/plugins/game_state.rs
+
+@@@ 1abaf17|2025-08-09|refactor
+49	0	assets/levels/level1.ron
+-	-	screenshots/first_frame.png
+5	1	src/lib.rs
+24	12	src/main.rs
+1	1	src/plugins/autoplay.rs
+124	0	src/plugins/ball.rs
+1	1	src/plugins/camera.rs
+1	1	src/plugins/core_sim.rs
+24	2	src/plugins/hud.rs
+357	0	src/plugins/level.rs
+269	0	src/plugins/shooting.rs
+114	0	src/plugins/target.rs
+1	1	src/plugins/vegetation.rs
+7	3	src/prelude.rs
+
+@@@ f27cb3d|2025-08-09|cleanup
+-	-	screenshots/first_frame.png
+3	3	src/main.rs
+0	850	src/plugins/scene.rs
+
+@@@ 2a5d2b9|2025-08-09|menu
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+3	0	src/main.rs
+171	0	src/plugins/main_menu.rs
+
+@@@ 6365d45|2025-08-09|clean up camera
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+1	0	src/lib.rs
+100	22	src/plugins/camera.rs
+38	20	src/plugins/level.rs
+23	1	src/plugins/main_menu.rs
+
+@@@ 208186c|2025-08-09|bigger level
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+149	75	src/plugins/terrain.rs
+
+@@@ 98480f8|2025-08-09|opening up world
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+1	19	src/plugins/ball.rs
+2	76	src/plugins/level.rs
+2	2	src/plugins/terrain_graph.rs
+
+@@@ 4ba3cd2|2025-08-09|clean up
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+26	10	src/plugins/level.rs
+136	5	src/plugins/terrain.rs
+
+@@@ 3542af2|2025-08-09|bigger world
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+2	10	src/plugins/camera.rs
+34	6	src/plugins/terrain.rs
+
+@@@ f032bd1|2025-08-09|fix things up
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+7	6	src/plugins/terrain.rs
+
+@@@ 2529ff4|2025-08-09|working on landscape/trees still
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+21	12	src/plugins/terrain.rs
+
+@@@ d31b887|2025-08-09|right foliage again
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+6	7	src/plugins/terrain.rs
+12	26	src/plugins/vegetation.rs
+
+@@@ a61ecb7|2025-08-10|clean up
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+290	210	src/plugins/vegetation.rs
+
+@@@ 8633e77|2025-08-10|cleaning
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+21	37	src/main.rs
+0	3	src/plugins/vegetation.rs
+24	1	src/prelude.rs
+
+@@@ 1b6abb7|2025-08-10|better trees
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+0	2	src/plugins/ball.rs
+0	1	src/plugins/camera.rs
+0	2	src/plugins/level.rs
+0	6	src/plugins/particles.rs
+0	112	src/plugins/terrain.rs
+58	39	src/plugins/vegetation.rs
+
+@@@ 1c8be0b|2025-08-10|better tree spawns
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+67	2	src/plugins/vegetation.rs
+
+@@@ 2f572c6|2025-08-10|better wandering camera
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+106	40	src/plugins/camera.rs
+
+@@@ d2aaa3e|2025-08-10|better
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+105	4	src/plugins/hud.rs
+
+@@@ 6d438d1|2025-08-10|target on ground
+5	3	assets/levels/level1.ron
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+
+@@@ 675337b|2025-08-10|clean up
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+192	78	src/plugins/hud.rs
+
+@@@ ca58699|2025-08-10|bestter spawns
+-	-	assets/models/ducky.glb
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+1	14	src/plugins/hud.rs
+1	0	src/plugins/level.rs
+12	12	src/plugins/target.rs
+
+@@@ 6303828|2025-08-10|less chunkky
+1	0	Cargo.lock
+1	0	Cargo.toml
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+231	207	src/plugins/terrain.rs
+
+@@@ c2fa1fe|2025-08-10|wow much better fps
+-	-	screenshots/first_frame.png
+156	40	src/plugins/vegetation.rs
+
+@@@ d6da2b8|2025-08-10|improved clip plane
+-	-	screenshots/first_frame.png
+5	0	src/plugins/level.rs
+
+@@@ 7217534|2025-08-10|drawing wihtout clipping
+1	1	assets/levels/level1.ron
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+
+@@@ e3a5d73|2025-08-10|much better draw distance
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+2	2	src/plugins/terrain.rs
+
+@@@ 2a528ea|2025-08-10|particles more reasonably placed
+-	-	screenshots/first_frame.png
+53	14	src/plugins/particles.rs
+
+@@@ 905a210|2025-08-10|cleanup
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+81	0	src/plugins/debug_scene.rs
+69	14	src/plugins/particles.rs
+
+@@@ b5aa180|2025-08-10|clear documentation/stories (to refine the agent and clean up on context pollution)
+0	91	.github/copilot-instructions.md
+0	30	README.md
+0	260	architecture.md
+0	7	game_design.md
+0	162	stories.md
+
+@@@ bb1e9ce|2025-08-10|optimization guide
+229	0	optimization_stories.md
+
+@@@ 56f76ad|2025-08-10|adding baseline measurements
+17	2	src/main.rs
+22	2	src/plugins/core_sim.rs
+
+@@@ bac90c3|2025-08-10|updating optimize guidelines
+45	22	optimization_stories.md
+
+@@@ 3b4a228|2025-08-10|perf menu
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+1	0	src/lib.rs
+2	0	src/main.rs
+6	6	src/plugins/particles.rs
+493	0	src/plugins/performance_menu.rs
+26	1	src/plugins/terrain.rs
+
+@@@ 08c907e|2025-08-10|clean up/optimize
+23	0	src/plugins/core_sim.rs
+4	34	src/plugins/terrain.rs
+14	11	src/plugins/vegetation.rs
+
+@@@ fb3a342|2025-08-10|clean up/optimization
+20	2	src/plugins/core_sim.rs
+89	23	src/plugins/terrain.rs
+
+@@@ 6257d6b|2025-08-10|clean up
+27	19	src/plugins/terrain.rs
+
+@@@ dff8a3a|2025-08-10|tweaks
+15	15	src/plugins/vegetation.rs
+
+@@@ cc32fc9|2025-08-10|clean up
+2	2	assets/levels/level1.ron
+-	-	assets/models/meatball.glb
+-	-	screenshots/first_frame.png
+7	5	src/main.rs
+11	2	src/plugins/core_sim.rs
+
+@@@ c0b499f|2025-08-10|rescale
+-	-	assets/models/candy_1.glb
+-	-	assets/models/candy_2.glb
+-	-	assets/models/ducky.glb
+-	-	assets/models/snowflake.glb
+-	-	assets/models/tree_1.glb
+-	-	assets/models/tree_2.glb
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+
+@@@ 18895b9|2025-08-10|update size of things
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+11	12	src/plugins/vegetation.rs
+
+@@@ 02da44c|2025-08-10|adding a heightmap
+-	-	assets/heightmaps/heightmap.png
+
+@@@ 977c04c|2025-08-10|heightmap renamed
+-	-	assets/heightmaps/{heightmap.png => level1.png}
+
+@@@ fbf97b6|2025-08-10|using precalculated height map
+21	1	Cargo.lock
+1	0	Cargo.toml
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+114	81	src/plugins/terrain.rs
+
+@@@ 31033cf|2025-08-10|added ocean
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+44	0	src/plugins/terrain.rs
+
+@@@ 0cca365|2025-08-10|water shader, reset, spawn constraints
+95	0	assets/shaders/water.wgsl
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+12	0	src/plugins/ball.rs
+22	3	src/plugins/level.rs
+18	6	src/plugins/target.rs
+5	0	src/plugins/vegetation.rs
+
+@@@ 50dcc8d|2025-08-10|clean up
+2	2	assets/levels/level1.ron
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+
+@@@ 196ea2f|2025-08-10|better camera
+2	1	assets/levels/level1.ron
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+92	18	src/plugins/camera.rs
+
+@@@ d9f8d36|2025-08-10|clean up
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+41	35	src/plugins/camera.rs
+
+@@@ 6a9a7fe|2025-08-10|update vegetation spawn
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+116	39	src/plugins/vegetation.rs
+
+@@@ 7e57e22|2025-08-10|better terrain
+178	0	assets/shaders/terrain_pbr_ext.wgsl
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+1	0	src/lib.rs
+2	2	src/main.rs
+8	17	src/plugins/terrain.rs
+98	0	src/plugins/terrain_material.rs
+1	0	src/prelude.rs
+
+@@@ 2700bbf|2025-08-10|lgtm
+38	8	assets/shaders/terrain_pbr_ext.wgsl
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+21	2	src/plugins/terrain_material.rs
+
+@@@ 95472de|2025-08-10|added gh page support
+14	0	.cargo/config.toml
+80	0	.github/workflows/deploy.yml
+38	0	Cargo.lock
+17	1	Cargo.toml
+10	1	src/main.rs
+175	5	src/plugins/terrain.rs
+-	-	web/assets/audio/bounce.mp3
+-	-	web/assets/audio/game_over.mp3
+-	-	web/assets/audio/hit.mp3
+-	-	web/assets/audio/launch.mp3
+-	-	web/assets/audio/music.mp3
+-	-	web/assets/fonts/FiraSans-Bold.ttf
+-	-	web/assets/heightmaps/level1.png
+52	0	web/assets/levels/level1.ron
+-	-	web/assets/models/candy_1.glb
+-	-	web/assets/models/candy_2.glb
+-	-	web/assets/models/ducky.glb
+-	-	web/assets/models/meatball.glb
+-	-	web/assets/models/snowflake.glb
+-	-	web/assets/models/tree_1.glb
+-	-	web/assets/models/tree_2.glb
+96	0	web/assets/shaders/contour.wgsl
+115	0	web/assets/shaders/contour_ext.wgsl
+208	0	web/assets/shaders/terrain_pbr_ext.wgsl
+95	0	web/assets/shaders/water.wgsl
+-	-	web/assets/skymap/citrus_orchard_puresky_4k.exr
+-	-	web/assets/skymap/kloppenheim_06_puresky_1k.hdr
+-	-	web/assets/skymap/kloppenheim_06_puresky_4k.hdr
+126	0	web/index.html
+2267	0	web/vibe_golf.js
+-	-	web/vibe_golf_bg.wasm
+
+@@@ 8f09e50|2025-08-10|update deploy job
+1	1	.cargo/config.toml
+1	1	.github/workflows/deploy.yml
+
+@@@ 90cb185|2025-08-10|update template
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+6	0	web/index.html
+
+@@@ 27fdfd0|2025-08-11|clean up
+0	1	Cargo.lock
+1	1	Cargo.toml
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+3	4	src/main.rs
+1	1	src/plugins/autoplay.rs
+0	21	src/plugins/hud.rs
+9	16	src/plugins/main_menu.rs
+3	3	src/plugins/particles.rs
+0	2	src/plugins/target.rs
+10	9	src/plugins/terrain.rs
+3	5	src/plugins/terrain_graph.rs
+1	9	src/plugins/terrain_material.rs
+5	1	src/screenshot.rs
+
+@@@ c0c5e56|2025-08-11|update file loading
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+13	0	src/plugins/terrain.rs
+
+@@@ 551fe60|2025-08-11|assets maybe work now?
+1023	285	Cargo.lock
+1	0	Cargo.toml
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+29	12	src/main.rs
+
+@@@ 9b4048c|2025-08-11|runs
+-	-	screenshots/first_frame.png
+-	-	screenshots/last_frame.png
+-	-	screenshots/last_run.png
+0	4	src/main.rs
+
+@@@ cafd653|2025-08-11|stop with screenshots
+10	4	src/main.rs
+
+@@@ bf51499|2025-08-11|fix up level loading
+25	10	src/plugins/level.rs
+
+@@@ 610f8d9|2025-08-11|clean up terrain shader
+32	69	assets/shaders/terrain_pbr_ext.wgsl
+16	16	src/plugins/terrain_material.rs
+
+@@@ 54aea34|2025-08-11|Create README.md
+3	0	README.md
+
+@@@ e9023f4|2025-08-11|updates to docs
+146	1	README.md
+348	0	dev_history_full.txt
+116	0	dev_history_raw.txt
+212	0	development_history.md

@@ -257,7 +257,7 @@ fn menu_camera_flight(
 
         // Focus point: center of island slightly above ground for nicer composition.
         let center_height = s.height(0.0, 0.0);
-        let focus = Vec3::new(0.0, center_height + 80.0, 0.0);
+        let focus = Vec3::new(0.0, center_height - 150.0, 0.0);
 
         cam_t.translation = flight.pos;
         cam_t.look_at(focus, Vec3::Y);
@@ -271,7 +271,7 @@ fn menu_camera_flight(
         let z = radius * flight.heading.sin();
         flight.pos = Vec3::new(x, y, z);
         cam_t.translation = flight.pos;
-        cam_t.look_at(Vec3::new(0.0, 80.0, 0.0), Vec3::Y);
+        cam_t.look_at(Vec3::new(0.0, -150.0, 0.0), Vec3::Y);
     }
 }
 
