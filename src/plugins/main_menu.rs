@@ -96,7 +96,7 @@ fn spawn_main_menu(
             // Basic controls
             parent.spawn(
                 TextBundle::from_section(
-                    "Left Click: Hold + release to shoot\nRight Click: Hold to orbit camera\nScroll Wheel: Zoom\nR: Restart after game over",
+                    "Left Click: Hold + release to shoot\nRight Click: Hold to orbit camera\nScroll Wheel: Zoom\nR: Restart after game over\nMobile: Hold + release to shoot | Swipe to look | Pinch to zoom",
                     TextStyle { font: font.clone(), font_size: 18.0, color: Color::srgb(0.70, 0.70, 0.75) },
                 )
                 .with_style(Style { margin: UiRect::all(Val::Px(4.0)), ..default() }),

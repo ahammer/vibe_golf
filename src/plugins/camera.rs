@@ -1,4 +1,5 @@
 use bevy::input::mouse::{MouseMotion, MouseWheel};
+use bevy::input::touch::TouchInput;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
 
@@ -102,6 +103,24 @@ pub struct OrbitCaptureState {
     pub captured: bool,
 }
 
+/// Single-finger orbit swipe tracking.
+#[derive(Resource, Default)]
+pub struct TouchOrbit {
+    pub active_id: Option<u64>,
+    pub last_pos: Vec2,
+    pub look_active: bool,
+}
+
+/// Pinch zoom tracking (two-finger).
+#[derive(Resource, Default)]
+pub struct PinchZoom {
+    pub id1: Option<u64>,
+    pub id2: Option<u64>,
+    pub pos1: Vec2,
+    pub pos2: Vec2,
+    pub initial_distance: f32,
+}
+
 /// Endless menu flight animation state.
 /// The camera gently wanders around the origin, changing heading slowly
 /// and keeping within a configurable radius. Creates a feeling of flying
@@ -132,6 +151,8 @@ impl Plugin for CameraPlugin {
             .insert_resource(CameraActual::default())
             .insert_resource(OrbitCaptureState::default())
             .insert_resource(MenuCameraFlight::default())
+            .insert_resource(TouchOrbit::default())
+            .insert_resource(PinchZoom::default())
             .add_systems(
                 Update,
                 (
@@ -184,6 +205,9 @@ fn orbit_camera_input(
     buttons: Res<ButtonInput<MouseButton>>,
     mut ev_motion: EventReader<MouseMotion>,
     mut ev_wheel: EventReader<MouseWheel>,
+    mut ev_touch: EventReader<TouchInput>,
+    mut touch_orbit: ResMut<TouchOrbit>,
+    mut pinch: ResMut<PinchZoom>,
     phase: Option<Res<GamePhase>>,
 ) {
     if matches!(phase.map(|p| *p), Some(GamePhase::Menu)) {
@@ -194,6 +218,70 @@ fn orbit_camera_input(
     for w in ev_wheel.read() {
         let delta = w.y * cfg.zoom_speed;
         state.radius = (state.radius - delta).clamp(cfg.radius_min, cfg.radius_max);
+    }
+
+    // Touch processing (swipe to look, pinch to zoom)
+    for ev in ev_touch.read() {
+        match ev.phase {
+            bevy::input::touch::TouchPhase::Started => {
+                // Pinch setup
+                if pinch.id1.is_none() {
+                    pinch.id1 = Some(ev.id);
+                    pinch.pos1 = ev.position;
+                } else if pinch.id2.is_none() && pinch.id1 != Some(ev.id) {
+                    pinch.id2 = Some(ev.id);
+                    pinch.pos2 = ev.position;
+                    pinch.initial_distance = (pinch.pos2 - pinch.pos1).length().max(1.0);
+                }
+                // Orbit swipe setup (only if no active orbit finger and not part of pinch yet)
+                if touch_orbit.active_id.is_none() && (pinch.id1 == Some(ev.id) && pinch.id2.is_none()) {
+                    touch_orbit.active_id = Some(ev.id);
+                    touch_orbit.last_pos = ev.position;
+                    touch_orbit.look_active = false;
+                }
+            }
+            bevy::input::touch::TouchPhase::Moved => {
+                // Update pinch positions
+                if pinch.id1 == Some(ev.id) {
+                    pinch.pos1 = ev.position;
+                } else if pinch.id2 == Some(ev.id) {
+                    pinch.pos2 = ev.position;
+                }
+                // Pinch zoom
+                if pinch.id1.is_some() && pinch.id2.is_some() {
+                    let current = (pinch.pos2 - pinch.pos1).length().max(1.0);
+                    let diff = current - pinch.initial_distance;
+                    // Scale radius inversely to pinch distance change
+                    state.radius = (state.radius - diff * 0.05 * cfg.zoom_speed)
+                        .clamp(cfg.radius_min, cfg.radius_max);
+                    pinch.initial_distance = current;
+                } else if touch_orbit.active_id == Some(ev.id) {
+                    // Single finger orbit
+                    let delta = ev.position - touch_orbit.last_pos;
+                    // Activate look after small threshold to avoid accidental shot cancel
+                    if delta.length() > 2.0 {
+                        touch_orbit.look_active = true;
+                    }
+                    if touch_orbit.look_active {
+                        state.yaw -= delta.x * cfg.sens_yaw * 0.6;
+                        state.pitch -= delta.y * cfg.sens_pitch * 0.6;
+                        state.pitch = state.pitch.clamp(cfg.pitch_min, cfg.pitch_max);
+                    }
+                    touch_orbit.last_pos = ev.position;
+                }
+            }
+            bevy::input::touch::TouchPhase::Ended | bevy::input::touch::TouchPhase::Cancelled => {
+                if pinch.id1 == Some(ev.id) || pinch.id2 == Some(ev.id) {
+                    // Reset pinch state completely
+                    pinch.id1 = None;
+                    pinch.id2 = None;
+                }
+                if touch_orbit.active_id == Some(ev.id) {
+                    touch_orbit.active_id = None;
+                    touch_orbit.look_active = false;
+                }
+            }
+        }
     }
 
     // Right mouse drag to adjust yaw/pitch

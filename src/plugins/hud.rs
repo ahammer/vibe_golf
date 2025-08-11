@@ -13,6 +13,9 @@ use bevy::window::PrimaryWindow;
 #[derive(Component)]
 pub struct Hud;
 
+#[derive(Resource, Default)]
+pub struct MobileHudHint(pub bool);
+
 // ---------------- Compass (graphics) ----------------
 #[derive(Component)]
 pub struct CompassRoot;
@@ -24,8 +27,9 @@ pub struct CompassDistanceText;
 pub struct HudPlugin;
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, (spawn_hud_text, spawn_compass_graphics))
-            .add_systems(Update, (update_hud, update_compass_graphics));
+        app.insert_resource(MobileHudHint::default())
+            .add_systems(Startup, (spawn_hud_text, spawn_compass_graphics))
+            .add_systems(Update, (detect_mobile_hint, update_hud, update_compass_graphics));
     }
 }
 
@@ -164,9 +168,19 @@ fn spawn_compass_graphics(
     });
 }
 
+fn detect_mobile_hint(
+    mut ev_touch: EventReader<bevy::input::touch::TouchInput>,
+    mut hint: ResMut<MobileHudHint>,
+) {
+    if !hint.0 && ev_touch.iter().next().is_some() {
+        hint.0 = true;
+    }
+}
+
 fn update_hud(
     sim: Res<SimState>,
     score: Res<Score>,
+    hint: Res<MobileHudHint>,
     q_ball: Query<&BallKinematic>,
     mut q_text: Query<&mut Text, With<Hud>>,
 ) {
@@ -176,7 +190,7 @@ fn update_hud(
             let avg_time = score.final_time / score.hits.max(1) as f32;
             let avg_shots = score.shots as f32 / score.hits.max(1) as f32;
             let best = score.high_score_time.map(|v| format!("{:.2}s", v)).unwrap_or_else(|| "--".to_string());
-            text.sections[0].value = format!(
+            let mut base = format!(
                 "GAME OVER | Time: {:.2}s | Best: {best} | Holes: {} | Shots: {} | Avg T/H: {:.2}s | Avg S/H: {:.2} | Press R",
                 score.final_time,
                 score.hits,
@@ -184,11 +198,15 @@ fn update_hud(
                 avg_time,
                 avg_shots,
             );
+            if hint.0 {
+                base.push_str("\nMobile: Hold + release to shoot | Swipe to look | Pinch to zoom");
+            }
+            text.sections[0].value = base;
         } else {
             let current_hole = score.hits + 1;
             let avg_time = if score.hits > 0 { sim.elapsed_seconds / score.hits as f32 } else { 0.0 };
             let avg_shots = if score.hits > 0 { score.shots as f32 / score.hits as f32 } else { 0.0 };
-            text.sections[0].value = format!(
+            let mut base = format!(
                 "Time: {:.2}s | Speed: {:.2} m/s | Hole: {}/{} | Shots: {} | Avg T/H: {:.2}s | Avg S/H: {:.2}",
                 sim.elapsed_seconds,
                 speed,
@@ -198,6 +216,10 @@ fn update_hud(
                 avg_time,
                 avg_shots,
             );
+            if hint.0 {
+                base.push_str("\nMobile: Hold + release to shoot | Swipe to look | Pinch to zoom");
+            }
+            text.sections[0].value = base;
         }
     }
 }
