@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vibe Golf (Web)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Vibe Golf WebAssembly build">
+<style>
+html,body {
+  margin:0;
+  padding:0;
+  width:100%;
+  height:100%;
+  background:#0d1117;
+  color:#eee;
+  font-family:system-ui,Arial,sans-serif;
+  overflow:hidden;
+}
+#loading {
+  position:fixed;
+  inset:0;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+  align-items:center;
+  justify-content:center;
+  background:#0d1117;
+  font-size:14px;
+  letter-spacing:.5px;
+}
+progress {
+  width:240px;
+  height:16px;
+}
+canvas {
+  outline:0;
+  width:100vw !important;
+  height:100vh !important;
+  display:block;
+}
+#err {
+  position:fixed;
+  top:0;
+  left:0;
+  right:0;
+  padding:8px 12px;
+  background:#b00020;
+  color:#fff;
+  font-size:13px;
+  display:none;
+  white-space:pre-wrap;
+}
+</style>
+</head>
+<body>
+<div id="err"></div>
+<div id="loading">
+  <div>Loading Vibe Golf...</div>
+  <progress id="pb" max="100" value="0"></progress>
+  <div id="status">Initializing</div>
+</div>
+<canvas id="bevy-canvas"></canvas>
+<script type="module">
+/*
+  This file is served from GitHub Pages.
+  The GitHub Action produces the files:
+    vibe_golf.wasm
+    vibe_golf.js
+    vibe_golf_bg.wasm (if split)
+  along with /assets copied from the repository.
+
+  We dynamically import the wasm-bindgen JS glue produced by:
+    wasm-bindgen --target web
+*/
+const statusEl = document.getElementById('status');
+const pb = document.getElementById('pb');
+const loading = document.getElementById('loading');
+const errEl = document.getElementById('err');
+
+function showError(e) {
+  console.error(e);
+  errEl.textContent = "Runtime Error:\\n" + (e?.stack || e);
+  errEl.style.display = 'block';
+  loading.style.display = 'none';
+}
+
+async function initWasm() {
+  try {
+    statusEl.textContent = 'Fetching artifacts';
+    // Hook fetch to update progress (best-effort; streaming progress only works on some browsers).
+    const origFetch = window.fetch;
+    window.fetch = async function(resource, init) {
+      const resp = await origFetch(resource, init);
+      if (typeof resource === 'string' && resource.endsWith('.wasm') && resp.body && resp.headers.get('Content-Length')) {
+        const total = parseInt(resp.headers.get('Content-Length'));
+        const reader = resp.body.getReader();
+        let received = 0;
+        const chunks = [];
+        while (true) {
+          const {done, value} = await reader.read();
+          if (done) break;
+            chunks.push(value);
+            received += value.length;
+            pb.value = (received / total) * 100;
+            statusEl.textContent = 'Downloading ' + (pb.value | 0) + '%';
+        }
+        const blob = new Blob(chunks);
+        return new Response(blob, resp);
+      }
+      return resp;
+    };
+
+    // Import wasm-bindgen JS glue (relative path).
+    const init = (await import('./vibe_golf.js')).default;
+    statusEl.textContent = 'Starting engine';
+    await init();
+    loading.style.display = 'none';
+  } catch (e) {
+    const msg = (e && e.message) ? e.message : String(e);
+    if (msg.includes("Using exceptions for control flow")) {
+      console.warn("Ignoring benign wgpu control-flow exception (expected internal wgpu wasm exception).");
+      loading.style.display = 'none';
+      return;
+    }
+    showError(e);
+  }
+}
+
+initWasm();
+</script>
+</body>
+</html>
