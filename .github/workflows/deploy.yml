@@ -10,7 +10,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: -C target-feature=+simd128
+  RUSTFLAGS: '-C target-feature=+simd128 --cfg=getrandom_backend="wasm_js"'
 
 jobs:
   build-deploy:
