@@ -46,24 +46,24 @@ impl Default for RealTerrainUniform {
             noise_scale: 0.0015,
             _pad1: 0.0,
             colors: [
-                Vec4::new(0.10, 0.25, 0.06, 1.0), // lowland deep grass
-                Vec4::new(0.20, 0.50, 0.18, 1.0), // lush grass
-                Vec4::new(0.38, 0.36, 0.34, 1.0), // rock
-                Vec4::new(0.90, 0.93, 0.95, 1.0), // snow
+                Vec4::new(0.11, 0.19, 0.09, 1.0), // lowland muddy moss (deep green)
+                Vec4::new(0.24, 0.37, 0.15, 1.0), // richer moss / grassy
+                Vec4::new(0.35, 0.34, 0.32, 1.0), // mid warm grey rock
+                Vec4::new(0.50, 0.47, 0.41, 1.0), // high rocky / sandy grey (replaces snow)
             ],
-            roughness_lowland: 0.85,
-            roughness_grass: 0.70,
+            roughness_lowland: 0.88,
+            roughness_grass: 0.75,
             roughness_rock: 0.55,
-            roughness_snow: 0.40,
-            color_variation: 0.08,
-            ao_strength: 0.6,
-            brightness: 0.90,
-            contrast: 1.35,
-            saturation: 1.25,
-            macro_amp: 0.45,
-            micro_amp: 0.10,
-            edge_accent: 0.10,
-            gamma: 1.08,
+            roughness_snow: 0.60, // high rocky/sandy
+            color_variation: 0.06,
+            ao_strength: 0.65,
+            brightness: 0.85,
+            contrast: 1.45,
+            saturation: 1.40,
+            macro_amp: 0.30,
+            micro_amp: 0.08,
+            edge_accent: 0.12,
+            gamma: 1.05,
             macro_scale: 0.18,
             micro_scale: 3.5,
             animation_speed: 0.0, // 0 = static (prevents temporal aliasing)
