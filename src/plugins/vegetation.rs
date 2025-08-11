@@ -17,11 +17,17 @@
 //  - Shadow LOD with hysteresis
 //  - Adaptive performance tuner
 //
+// Added:
+//  - Long distance gradient fade system (scale based) for distant vegetation instead of abrupt pop.
+//    (Can be combined with or replace distance culling; by default hard culling disabled now.)
+//    This keeps trees present far away while gently shrinking out to hide.
+//
 // Future potential:
 //  - True GPU buffer-based instancing capturing original child local transforms
 //  - Billboard / impostor far LOD
 //  - Streaming unload + spatial partition for runtime memory reclaim
 //  - Parallel sampling via task pool
+//  - Per-instance shader driven alpha fade (would allow keeping scale w/o material duplication)
 //
 // NOTE: For determinism you could replace thread_rng with a seeded RNG from cfg.seed.
 
@@ -41,6 +47,7 @@ impl Plugin for VegetationPlugin {
         app.insert_resource(VegetationConfig::default())
             .insert_resource(VegetationCullingConfig::default())
             .insert_resource(VegetationLodConfig::default())
+            .insert_resource(VegetationFadeConfig::default())
             .insert_resource(VegetationPerfTuner::default())
             .insert_resource(VegetationMeshVariants::default())
             .add_systems(Startup, prepare_vegetation)
@@ -71,7 +78,8 @@ impl Plugin for VegetationPlugin {
                     vegetation_expand_area.before(progressive_spawn_trees),
                     progressive_spawn_trees,
                     cull_trees.after(progressive_spawn_trees),
-                    tree_lod_update.after(cull_trees),
+                    tree_distance_fade.after(cull_trees),
+                    tree_lod_update.after(tree_distance_fade),
                     vegetation_perf_tuner.after(tree_lod_update),
                     vegetation_draw_call_debug.after(vegetation_perf_tuner),
                 ),
@@ -88,6 +96,9 @@ struct TreeCulled(bool); // true if currently hidden
 struct TreeLod {
     shadows_on: bool,
 }
+
+#[derive(Component, Copy, Clone)]
+struct TreeBaseScale(pub Vec3);
 
 // ---------------- Configuration Resources ----------------
 
@@ -154,19 +165,19 @@ impl Default for VegetationConfig {
 // Distance culling configuration
 #[derive(Resource)]
 pub struct VegetationCullingConfig {
-    pub max_distance: f32,     // soft visibility radius
+    pub max_distance: f32,     // soft visibility radius (now very large by default)
     pub hysteresis: f32,       // +/- band to avoid popping
     pub update_interval: f32,  // seconds between passes
     pub enable_distance: bool, // if false, no distance-based hide
 }
 impl Default for VegetationCullingConfig {
+    // Set to disabled & long range by default; gradient fade handles far removal.
     fn default() -> Self {
-        // OPT-01 (tuned pass 2): Lower initial radius to reduce visible tree count & fragment load sooner.
         Self {
-            max_distance: 190.0,
-            hysteresis: 14.0,
-            update_interval: 0.33,
-            enable_distance: true,
+            max_distance: 800.0,
+            hysteresis: 20.0,
+            update_interval: 0.75,
+            enable_distance: false,
         }
     }
 }
@@ -186,12 +197,11 @@ pub struct VegetationLodConfig {
 }
 impl Default for VegetationLodConfig {
     fn default() -> Self {
-        // OPT-02 (tuned pass 2): Further reduce shadow radius to cut far shadow casters.
         Self {
-            shadows_full_on: 70.0,
-            shadows_full_off: 95.0,
-            hysteresis: 8.0,
-            update_interval: 0.25,
+            shadows_full_on: 90.0,
+            shadows_full_off: 130.0,
+            hysteresis: 10.0,
+            update_interval: 0.35,
         }
     }
 }
@@ -199,6 +209,23 @@ impl Default for VegetationLodConfig {
 #[derive(Resource)]
 struct VegetationLodState {
     timer: Timer,
+}
+
+// Gradient fade config
+#[derive(Resource)]
+pub struct VegetationFadeConfig {
+    pub enable: bool,
+    pub start: f32, // distance where fade begins (full size inside)
+    pub end: f32,   // distance where tree fully hidden
+}
+impl Default for VegetationFadeConfig {
+    fn default() -> Self {
+        Self {
+            enable: true,
+            start: 550.0,
+            end: 750.0,
+        }
+    }
 }
 
 // Adaptive performance tuner
@@ -221,22 +248,21 @@ struct VegetationPerfTuner {
 }
 impl Default for VegetationPerfTuner {
     fn default() -> Self {
-        // Tuned with lower target distances to drive lower fill cost.
         Self {
             timer: Timer::from_seconds(0.6, TimerMode::Repeating),
             target_fps: 120.0,
             low_band: 0.92,
             high_band: 1.05,
-            default_cull: 170.0,
-            default_shadow_on: 70.0,
-            default_shadow_off: 95.0,
-            min_cull: 110.0,
-            max_cull: 190.0,
-            min_shadow_on: 50.0,
-            max_shadow_on: 100.0,
-            min_shadow_off: 65.0,
-            max_shadow_off: 130.0,
-            adjust_step: 6.0,
+            default_cull: 600.0,
+            default_shadow_on: 90.0,
+            default_shadow_off: 130.0,
+            min_cull: 400.0,
+            max_cull: 800.0,
+            min_shadow_on: 60.0,
+            max_shadow_on: 140.0,
+            min_shadow_off: 80.0,
+            max_shadow_off: 200.0,
+            adjust_step: 10.0,
         }
     }
 }
@@ -330,8 +356,8 @@ struct VegetationSpawnState {
     slope_rejects: usize,
     inner_spawned: usize,
     finished: bool,
-    batch_scene: Vec<(SceneBundle, (Tree, TreeCulled, TreeLod))>,
-    batch_pbr: Vec<(PbrBundle, (Tree, TreeCulled, TreeLod))>,
+    batch_scene: Vec<(SceneBundle, (Tree, TreeCulled, TreeLod, TreeBaseScale))>,
+    batch_pbr: Vec<(PbrBundle, (Tree, TreeCulled, TreeLod, TreeBaseScale))>,
     spacing_grid: SpacingGrid,
     half_extent: f32,
     seen_cells: HashSet<(i32, i32)>,
@@ -744,6 +770,7 @@ fn progressive_spawn_trees(
         }
 
         let transform = build_transform(p, h, &mut rng, &cfg);
+        let base_scale = TreeBaseScale(transform.scale);
 
         if use_pbr {
             if let Some((mesh, material)) = random_variant(&mut rng, &variants.variants) {
@@ -754,7 +781,12 @@ fn progressive_spawn_trees(
                         transform,
                         ..default()
                     },
-                    (Tree, TreeCulled(false), TreeLod { shadows_on: true }),
+                    (
+                        Tree,
+                        TreeCulled(false),
+                        TreeLod { shadows_on: true },
+                        base_scale,
+                    ),
                 ));
             }
         } else {
@@ -765,7 +797,12 @@ fn progressive_spawn_trees(
                     transform,
                     ..default()
                 },
-                (Tree, TreeCulled(false), TreeLod { shadows_on: true }),
+                (
+                    Tree,
+                    TreeCulled(false),
+                    TreeLod { shadows_on: true },
+                    base_scale,
+                ),
             ));
         }
 
@@ -777,19 +814,15 @@ fn progressive_spawn_trees(
 
         if state.batch_scene.len() >= cfg.batch_spawn_flush {
             let drained = std::mem::take(&mut state.batch_scene);
-            commands.spawn_batch(
-                drained
-                    .into_iter()
-                    .map(|(bundle, comps)| (bundle, comps.0, comps.1, comps.2)),
-            );
+            commands.spawn_batch(drained.into_iter().map(
+                |(bundle, comps)| (bundle, comps.0, comps.1, comps.2, comps.3),
+            ));
         }
         if state.batch_pbr.len() >= cfg.batch_spawn_flush {
             let drained = std::mem::take(&mut state.batch_pbr);
-            commands.spawn_batch(
-                drained
-                    .into_iter()
-                    .map(|(bundle, comps)| (bundle, comps.0, comps.1, comps.2)),
-            );
+            commands.spawn_batch(drained.into_iter().map(
+                |(bundle, comps)| (bundle, comps.0, comps.1, comps.2, comps.3),
+            ));
         }
     }
 
@@ -799,7 +832,7 @@ fn progressive_spawn_trees(
         commands.spawn_batch(
             drained
                 .into_iter()
-                .map(|(bundle, comps)| (bundle, comps.0, comps.1, comps.2)),
+                .map(|(bundle, comps)| (bundle, comps.0, comps.1, comps.2, comps.3)),
         );
     }
     if !state.batch_pbr.is_empty() {
@@ -807,7 +840,7 @@ fn progressive_spawn_trees(
         commands.spawn_batch(
             drained
                 .into_iter()
-                .map(|(bundle, comps)| (bundle, comps.0, comps.1, comps.2)),
+                .map(|(bundle, comps)| (bundle, comps.0, comps.1, comps.2, comps.3)),
         );
     }
 
@@ -858,6 +891,50 @@ fn cull_trees(
         } else if culled.0 && d2 < show_r2 {
             *vis = Visibility::Inherited;
             culled.0 = false;
+        }
+    }
+}
+
+// Distance-based gradient fade (scales trees down smoothly between start and end, then hides).
+fn tree_distance_fade(
+    fade_cfg: Res<VegetationFadeConfig>,
+    q_ball: Query<&Transform, (With<Ball>, Without<Tree>)>,
+    mut q_trees: Query<(&mut Transform, &TreeBaseScale, &mut Visibility, &TreeCulled), With<Tree>>,
+) {
+    if !fade_cfg.enable {
+        return;
+    }
+    let Ok(ball_t) = q_ball.get_single() else { return; };
+    let origin = ball_t.translation;
+
+    let start2 = fade_cfg.start * fade_cfg.start;
+    let end2 = fade_cfg.end * fade_cfg.end;
+    let span = (fade_cfg.end - fade_cfg.start).max(1.0);
+
+    for (mut transform, base_scale, mut vis, culled) in &mut q_trees {
+        if culled.0 {
+            continue;
+        }
+        let d_vec = transform.translation - origin;
+        let d2 = d_vec.length_squared();
+
+        if d2 <= start2 {
+            transform.scale = base_scale.0;
+            *vis = Visibility::Inherited;
+        } else if d2 >= end2 {
+            *vis = Visibility::Hidden;
+        } else {
+            let d = d2.sqrt();
+            let t = (d - fade_cfg.start) / span;
+            // Smoothstep for smoother transition
+            let t_s = t * t * (3.0 - 2.0 * t);
+            let factor = 1.0 - t_s;
+            transform.scale = base_scale.0 * factor;
+            if factor < 0.02 {
+                *vis = Visibility::Hidden;
+            } else {
+                *vis = Visibility::Inherited;
+            }
         }
     }
 }
