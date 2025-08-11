@@ -1,0 +1,348 @@
+d1fe791|2025-08-08|initial command
+
+----
+32b50d8|2025-08-08|built architect doc
+
+----
+452c599|2025-08-08|some tracking/ball work
+
+----
+9429b03|2025-08-08|updating designs/context/settings
+
+----
+6ebe90a|2025-08-08|clean up
+
+----
+60f305d|2025-08-08|working kind of
+
+----
+70b7200|2025-08-08|it runs
+
+----
+740e9f2|2025-08-08|wip
+
+----
+744ff01|2025-08-08|move to procedural generation
+
+----
+6d32ae4|2025-08-08|shows a landscape
+
+----
+516f975|2025-08-08|kind of running better?
+
+----
+c4ae84d|2025-08-08|smoother
+
+----
+045daa4|2025-08-08|dropping through the landscape
+
+----
+a28b83e|2025-08-08|better ball
+
+----
+9aa53ba|2025-08-08|much better
+
+----
+b4e0a0b|2025-08-08|terrain now filling and ball falling
+
+----
+f78da0a|2025-08-08|bigger terrain
+
+----
+663349c|2025-08-08|improvements to gfx
+
+----
+7cfb1c6|2025-08-08|clean up priorities
+
+----
+91dfc72|2025-08-09|some inputs
+
+----
+430900c|2025-08-09|much better
+
+----
+4c3e9f6|2025-08-09|looking much better
+
+----
+76cd454|2025-08-09|now with shooting
+
+----
+77e1887|2025-08-09|added a skymap, basic gameplay working
+
+----
+d487763|2025-08-09|skymap
+
+----
+80cb729|2025-08-09|HDRI now in there
+
+----
+5c6d62e|2025-08-09|full game
+
+----
+7c01137|2025-08-09|improvements
+
+----
+df4ff21|2025-08-09|particles
+
+----
+fd6ddda|2025-08-09|audio working
+
+----
+60cf285|2025-08-09|more colors
+
+----
+3b575db|2025-08-09|clean up
+
+----
+f0739dc|2025-08-09|shadows back
+
+----
+2c8236e|2025-08-09|update with walls
+
+----
+47f86ec|2025-08-09|terrain graph system
+
+----
+7dedbe8|2025-08-09|better camera
+
+----
+b50d56c|2025-08-09|added models
+
+----
+880cbad|2025-08-09|nice, meshes work (but need scaling and placement)
+
+----
+f771171|2025-08-09|candy collisions have gravity
+
+----
+7c98d3f|2025-08-09|meatballs and explosions
+
+----
+ab3d6c6|2025-08-09|bigger ducky, no collision yet
+
+----
+45a6579|2025-08-09|contour lines look better
+
+----
+617cce7|2025-08-09|more poofs
+
+----
+107a776|2025-08-09|great
+
+----
+3da15d0|2025-08-09|this looks good now
+
+----
+0ac4aa4|2025-08-09|optimization
+
+----
+881d8d4|2025-08-09|clean up
+
+----
+9b59f38|2025-08-09|optimized
+
+----
+15d44dc|2025-08-09|updates
+
+----
+3055394|2025-08-09|optimizing
+
+----
+9679730|2025-08-09|gpu driving particles
+
+----
+5778c96|2025-08-09|improvements to the shot indicator
+
+----
+b40f5cf|2025-08-09|walls
+
+----
+f03de43|2025-08-09|better wall
+
+----
+1915342|2025-08-09|clean up
+
+----
+1abaf17|2025-08-09|refactor
+
+----
+f27cb3d|2025-08-09|cleanup
+
+----
+2a5d2b9|2025-08-09|menu
+
+----
+6365d45|2025-08-09|clean up camera
+
+----
+208186c|2025-08-09|bigger level
+
+----
+98480f8|2025-08-09|opening up world
+
+----
+4ba3cd2|2025-08-09|clean up
+
+----
+3542af2|2025-08-09|bigger world
+
+----
+f032bd1|2025-08-09|fix things up
+
+----
+2529ff4|2025-08-09|working on landscape/trees still
+
+----
+d31b887|2025-08-09|right foliage again
+
+----
+a61ecb7|2025-08-10|clean up
+
+----
+8633e77|2025-08-10|cleaning
+
+----
+1b6abb7|2025-08-10|better trees
+
+----
+1c8be0b|2025-08-10|better tree spawns
+
+----
+2f572c6|2025-08-10|better wandering camera
+
+----
+d2aaa3e|2025-08-10|better
+
+----
+6d438d1|2025-08-10|target on ground
+
+----
+675337b|2025-08-10|clean up
+
+----
+ca58699|2025-08-10|bestter spawns
+
+----
+6303828|2025-08-10|less chunkky
+
+----
+c2fa1fe|2025-08-10|wow much better fps
+
+----
+d6da2b8|2025-08-10|improved clip plane
+
+----
+7217534|2025-08-10|drawing wihtout clipping
+
+----
+e3a5d73|2025-08-10|much better draw distance
+
+----
+2a528ea|2025-08-10|particles more reasonably placed
+
+----
+905a210|2025-08-10|cleanup
+
+----
+b5aa180|2025-08-10|clear documentation/stories (to refine the agent and clean up on context pollution)
+
+----
+bb1e9ce|2025-08-10|optimization guide
+
+----
+56f76ad|2025-08-10|adding baseline measurements
+
+----
+bac90c3|2025-08-10|updating optimize guidelines
+
+----
+3b4a228|2025-08-10|perf menu
+
+----
+08c907e|2025-08-10|clean up/optimize
+
+----
+fb3a342|2025-08-10|clean up/optimization
+
+----
+6257d6b|2025-08-10|clean up
+
+----
+dff8a3a|2025-08-10|tweaks
+
+----
+cc32fc9|2025-08-10|clean up
+
+----
+c0b499f|2025-08-10|rescale
+
+----
+18895b9|2025-08-10|update size of things
+
+----
+02da44c|2025-08-10|adding a heightmap
+
+----
+977c04c|2025-08-10|heightmap renamed
+
+----
+fbf97b6|2025-08-10|using precalculated height map
+
+----
+31033cf|2025-08-10|added ocean
+
+----
+0cca365|2025-08-10|water shader, reset, spawn constraints
+
+----
+50dcc8d|2025-08-10|clean up
+
+----
+196ea2f|2025-08-10|better camera
+
+----
+d9f8d36|2025-08-10|clean up
+
+----
+6a9a7fe|2025-08-10|update vegetation spawn
+
+----
+7e57e22|2025-08-10|better terrain
+
+----
+2700bbf|2025-08-10|lgtm
+
+----
+95472de|2025-08-10|added gh page support
+
+----
+8f09e50|2025-08-10|update deploy job
+
+----
+90cb185|2025-08-10|update template
+
+----
+27fdfd0|2025-08-11|clean up
+
+----
+c0c5e56|2025-08-11|update file loading
+
+----
+551fe60|2025-08-11|assets maybe work now?
+
+----
+9b4048c|2025-08-11|runs
+
+----
+cafd653|2025-08-11|stop with screenshots
+
+----
+bf51499|2025-08-11|fix up level loading
+
+----
+610f8d9|2025-08-11|clean up terrain shader
+
+----
+54aea34|2025-08-11|Create README.md
+
+----
