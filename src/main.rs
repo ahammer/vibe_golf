@@ -32,7 +32,8 @@ fn main() {
     console_error_panic_hook::set_once();
 
     let args: Vec<String> = std::env::args().collect();
-    let screenshot_enabled = !args.iter().any(|a| a == "--no-screenshot");
+    // Screenshots now opt-in: enable only if --screenshot flag is present.
+    let screenshot_enabled = args.iter().any(|a| a == "--screenshot");
     // Parse -runtime / --runtime flags (supports -runtime 30, --runtime 30, -runtime=30, --runtime=30)
     // Also detect whether the flag was supplied to enable auto-exit behavior.
     let mut runtime_flag: Option<f32> = None;
@@ -95,10 +96,15 @@ fn main() {
         // .add_plugins(AutoplayPlugin)     // optional automated swings
         .add_plugins(HudPlugin)             // HUD (score/time)
         .add_plugins(CameraPlugin)          // camera follow/orbit
-        .add_plugins(ScreenshotPlugin)      // screenshot capture
         .add_plugins(PerformanceMenuPlugin) // realtime performance menu (gear icon)
         .add_plugins(FrameTimeDiagnosticsPlugin)
-        .add_plugins(LogDiagnosticsPlugin::default())
-        .run();
+        .add_plugins(LogDiagnosticsPlugin::default());
+
+    if screenshot_enabled {
+        // Add screenshot capture plugin only when flag is provided.
+        app.add_plugins(ScreenshotPlugin);
+    }
+
+    app.run();
 }
 // Tests for core simulation now reside implicitly in plugin code if needed; keeping a lightweight smoke test here optional.
