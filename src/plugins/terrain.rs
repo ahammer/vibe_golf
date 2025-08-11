@@ -110,7 +110,9 @@ struct Heightmap {
 
 impl Heightmap {
     fn load(path: &str) -> Self {
-        let img = image::open(path).expect(&format!("Failed to open heightmap {}", path)).to_rgb8();
+        let img = image::open(path)
+            .unwrap_or_else(|_| panic!("Failed to open heightmap {}", path))
+            .to_rgb8();
         let (w, h) = img.dimensions();
         let raw = img.into_raw();
         let mut red = Vec::with_capacity((w * h) as usize);
@@ -171,7 +173,7 @@ impl TerrainSampler {
         let world_size = self.cfg.heightmap_world_size;
         let nx = (x / world_size) + 0.5;
         let nz = (z / world_size) + 0.5;
-        if nx < 0.0 || nx > 1.0 || nz < 0.0 || nz > 1.0 {
+        if !(0.0..=1.0).contains(&nx) || !(0.0..=1.0).contains(&nz) {
             return 0.0;
         }
         let u = nx * (self.heightmap.width - 1) as f32;
@@ -243,7 +245,6 @@ struct ChunkBuildResult {
 #[derive(Component)]
 #[cfg(not(target_arch = "wasm32"))]
 struct ChunkBuildTask {
-    coord: IVec2,
     task: Task<ChunkBuildResult>,
 }
 
@@ -359,9 +360,9 @@ fn update_terrain_chunks(
     mut commands: Commands,
     mut loaded: ResMut<LoadedChunks>,
     mut in_progress: ResMut<InProgressChunks>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut terrain_mats: ResMut<Assets<ExtendedMaterial<StandardMaterial, RealTerrainExtension>>>,
-    mut global_mat: ResMut<TerrainGlobalMaterial>,
+    #[cfg(target_arch = "wasm32")] mut meshes: ResMut<Assets<Mesh>>,
+    #[cfg(target_arch = "wasm32")] mut terrain_mats: ResMut<Assets<ExtendedMaterial<StandardMaterial, RealTerrainExtension>>>,
+    #[cfg(target_arch = "wasm32")] mut global_mat: ResMut<TerrainGlobalMaterial>,
     sampler: Res<TerrainSampler>,
     q_ball: Query<&Transform, With<Ball>>,
 ) {
@@ -473,7 +474,7 @@ fn update_terrain_chunks(
                     let i1 = i0 + 1;
                     let i2 = i0 + row;
                     let i3 = i2 + 1;
-                    indices.extend_from_slice(&[i0, i2, i1, i1, i2, i3].map(|v| v as u32));
+                    indices.extend_from_slice(&[i0, i2, i1, i1, i2, i3]);
                 }
             }
 
@@ -633,7 +634,7 @@ fn spawn_chunk_task(commands: &mut Commands, coord: IVec2, sampler: TerrainSampl
                 let i1 = i0 + 1;
                 let i2 = i0 + row;
                 let i3 = i2 + 1;
-                indices.extend_from_slice(&[i0, i2, i1, i1, i2, i3].map(|v| v as u32));
+                indices.extend_from_slice(&[i0, i2, i1, i1, i2, i3]);
             }
         }
 
@@ -654,7 +655,7 @@ fn spawn_chunk_task(commands: &mut Commands, coord: IVec2, sampler: TerrainSampl
             create_collider,
         }
     });
-    commands.spawn(ChunkBuildTask { coord, task });
+    commands.spawn(ChunkBuildTask { task });
 }
 
 #[cfg(not(target_arch = "wasm32"))]

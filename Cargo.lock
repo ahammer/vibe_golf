@@ -3405,7 +3405,6 @@ dependencies = [
  "serde",
  "simba",
  "thiserror",
- "vec_map",
 ]
 
 [[package]]

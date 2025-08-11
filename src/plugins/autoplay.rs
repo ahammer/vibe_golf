@@ -41,7 +41,7 @@ fn debug_log_each_second(
     q_ball: Query<(&Transform, &Velocity), With<Ball>>,
 ) {
     if sim.tick == 0 || sim.tick % 60 != 0 { return; }
-    let current_second = (sim.tick / 60) as u64;
+    let current_second = sim.tick / 60;
     if current_second == 0 || current_second == log_state.last_logged_second { return; }
     log_state.last_logged_second = current_second;
     if let Ok((t, vel)) = q_ball.get_single() {

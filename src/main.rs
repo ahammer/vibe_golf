@@ -1,7 +1,6 @@
-//// Migration Notes:
-//// R1/P0: Fixed 60 Hz gameplay tick reinstated (see architecture docs).
-//// R1/P1: Modularization – systems split into focused plugins under src/plugins/ (core_sim, level, ball, target, shooting, autoplay, hud, camera, terrain, particles, audio, vegetation, etc).
-
+/// Migration Notes:
+/// R1/P0: Fixed 60 Hz gameplay tick reinstated (see architecture docs).
+/// R1/P1: Modularization – systems split into focused plugins under src/plugins/ (core_sim, level, ball, target, shooting, autoplay, hud, camera, terrain, particles, audio, vegetation, etc).
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};

@@ -72,18 +72,10 @@ impl Default for RealTerrainUniform {
 }
 
 /// Extension type.
-#[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]
+#[derive(Asset, AsBindGroup, TypePath, Debug, Clone, Default)]
 pub struct RealTerrainExtension {
     #[uniform(100)]
     pub data: RealTerrainUniform,
-}
-
-impl Default for RealTerrainExtension {
-    fn default() -> Self {
-        Self {
-            data: RealTerrainUniform::default(),
-        }
-    }
 }
 
 impl MaterialExtension for RealTerrainExtension {

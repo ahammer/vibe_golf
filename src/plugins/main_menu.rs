@@ -5,14 +5,11 @@ use bevy::prelude::*;
 use crate::plugins::game_state::Score;
 use crate::plugins::ball::Ball;
 
-#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GamePhase {
+    #[default]
     Menu,
     Playing,
-}
-
-impl Default for GamePhase {
-    fn default() -> Self { GamePhase::Menu }
 }
 
 #[derive(Component)]
@@ -175,19 +172,15 @@ fn menu_button_system(
         return;
     }
     for (interaction, _entity, play, quit) in &q_buttons {
-        match *interaction {
-            Interaction::Pressed => {
-                if play.is_some() {
-                    *phase = GamePhase::Playing;
-                    // Despawn entire menu tree
-                    if let Ok(root) = q_root.get_single() {
-                        commands.entity(root).despawn_recursive();
-                    }
-                } else if quit.is_some() {
-                    exit.send(AppExit::Success);
+        if *interaction == Interaction::Pressed {
+            if play.is_some() {
+                *phase = GamePhase::Playing;
+                if let Ok(root) = q_root.get_single() {
+                    commands.entity(root).despawn_recursive();
                 }
+            } else if quit.is_some() {
+                exit.send(AppExit::Success);
             }
-            _ => {}
         }
     }
 }

@@ -190,12 +190,10 @@ pub fn build_terrain_graph(cfg: &crate::plugins::terrain::TerrainConfig) -> Node
     }) as NodeRef;
 
     // Domain warp on combined
-    let warped = Arc::new(DomainWarpNode {
+    // No crater shaping (open world)
+    Arc::new(DomainWarpNode {
         child: combined,
         warp_frequency: cfg.warp_frequency,
         warp_amplitude: cfg.warp_amplitude,
-    }) as NodeRef;
-
-    // No crater shaping (open world)
-    warped
+    }) as NodeRef
 }

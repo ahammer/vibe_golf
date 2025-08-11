@@ -78,27 +78,6 @@ fn build_circle_mesh(radius: f32, segments: usize) -> Mesh {
     mesh
 }
 
-// Simple rectangle centered at origin (width x height)
-fn build_rect_mesh(width: f32, height: f32) -> Mesh {
-    use bevy::render::mesh::{Indices, PrimitiveTopology};
-    let hw = width * 0.5;
-    let hh = height * 0.5;
-    let positions = vec![
-        [-hw, -hh, 0.0],
-        [ hw, -hh, 0.0],
-        [ hw,  hh, 0.0],
-        [-hw,  hh, 0.0],
-    ];
-    let normals = vec![[0.0, 0.0, 1.0]; 4];
-    let uvs = vec![[0.0,0.0],[1.0,0.0],[1.0,1.0],[0.0,1.0]];
-    let indices = vec![0u32,1,2, 0,2,3];
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-    mesh.insert_indices(Indices::U32(indices));
-    mesh
-}
 
 // Spawn compass graphics (2D overlay camera + circle & markers)
 fn spawn_compass_graphics(

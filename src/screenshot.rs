@@ -44,7 +44,11 @@ fn cleanup_previous_screenshots(cfg: Option<Res<ScreenshotConfig>>) {
             for entry in entries.flatten() {
                 if let Ok(ft) = entry.file_type() { if !ft.is_file() { continue; } }
                 let path = entry.path();
-                if let Some(ext) = path.extension() { if ext == "png" { if fs::remove_file(&path).is_ok() { removed += 1; } } }
+                if let Some(ext) = path.extension() {
+                    if ext == "png" && fs::remove_file(&path).is_ok() {
+                        removed += 1;
+                    }
+                }
             }
             if removed > 0 { info!("SCREENSHOT cleanup removed={}", removed); }
         }

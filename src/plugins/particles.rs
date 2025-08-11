@@ -74,7 +74,7 @@ impl Default for AtmosDustConfig {
 
 #[derive(Resource)]
 pub struct ParticleMaterials {
-    dust: Handle<StandardMaterial>, // only used for atmospheric dust now
+    _dust: Handle<StandardMaterial>, // reserved (was atmospheric dust material)
 }
 
 impl FromWorld for ParticleMaterials {
@@ -86,7 +86,7 @@ impl FromWorld for ParticleMaterials {
             metallic: 0.0,
             ..default()
         });
-        Self { dust }
+        Self { _dust: dust }
     }
 }
 
@@ -272,7 +272,7 @@ fn recycle_atmospheric_dust(
 }
 
 // Helper: pick candy handle
-fn random_candy<'a>(rng: &mut impl Rng, candy: &'a [Handle<Scene>; 2]) -> Handle<Scene> {
+fn random_candy(rng: &mut impl Rng, candy: &[Handle<Scene>; 2]) -> Handle<Scene> {
     if rng.gen_bool(0.5) {
         candy[0].clone()
     } else {

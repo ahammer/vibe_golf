@@ -6,7 +6,6 @@ use crate::plugins::ball::{Ball, BallKinematic};
 use crate::plugins::game_state::{Score, update_high_score};
 use crate::plugins::core_sim::SimState;
 use crate::plugins::terrain::TerrainSampler;
-use crate::plugins::level::LevelDef;
 use crate::plugins::particles::{TargetHitEvent, GameOverEvent};
 
 #[derive(Component)]
@@ -58,7 +57,6 @@ pub fn detect_target_hits(
     mut score: ResMut<Score>,
     sim: Res<SimState>,
     sampler: Res<TerrainSampler>,
-    level: Option<Res<LevelDef>>,
     params: Option<Res<TargetParams>>,
     mut q_target: Query<(&mut Transform, &mut TargetFloat), (With<Target>, Without<Ball>)>,
     q_ball: Query<(&Transform, &BallKinematic), With<Ball>>,
