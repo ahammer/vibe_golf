@@ -4,6 +4,9 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
+use bevy::asset::{AssetPlugin, AssetMode};
+#[cfg(target_arch = "wasm32")]
+use bevy_embedded_assets::EmbeddedAssetPlugin;
 
 use vibe_golf::plugins::{
     core_sim::{CoreSimPlugin, AutoConfig},
@@ -47,8 +50,9 @@ fn main() {
     let exit_enabled = runtime_flag.is_some();
     let runtime_seconds = runtime_flag.unwrap_or(20.0);
 
-    App::new()
-        .insert_resource(AutoConfig { exit_enabled, run_duration_seconds: runtime_seconds, ..Default::default() })
+    // Build the app in stages to allow cfg-gated plugin insertion without illegal attributes in method chains.
+    let mut app = App::new();
+    app.insert_resource(AutoConfig { exit_enabled, run_duration_seconds: runtime_seconds, ..Default::default() })
         .insert_resource(ClearColor(Color::srgb(0.52, 0.80, 0.92)))
         .insert_resource(Msaa::Sample4)
         .insert_resource(AmbientLight {
@@ -56,16 +60,29 @@ fn main() {
             brightness: 800.0,
         })
         .insert_resource(ScreenshotConfig::new(screenshot_enabled))
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Vibe Golf".into(),
-                #[cfg(target_arch = "wasm32")]
-                canvas: Some("#bevy-canvas".into()),
-                ..default()
-            }),
-            ..default()
-        }))
-        .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "Vibe Golf".into(),
+                        #[cfg(target_arch = "wasm32")]
+                        canvas: Some("#bevy-canvas".into()),
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(AssetPlugin {
+                    // On web we don't ship processed .meta files; use unprocessed mode to avoid 404s.
+                    mode: AssetMode::Unprocessed,
+                    file_path: "assets".into(),
+                    ..default()
+                })
+        );
+
+    #[cfg(target_arch = "wasm32")]
+    app.add_plugins(EmbeddedAssetPlugin::default());
+
+    app.add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
         // Gameplay & rendering plugins (order preserved)
         .add_plugins(CoreSimPlugin)         // timing + shared resources
         .add_plugins(TerrainMaterialPlugin) // realistic terrain material (shader)

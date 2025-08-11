@@ -21,6 +21,7 @@ bevy_rapier3d = { version = "0.27", default-features = false, features = ["dim3"
 console_error_panic_hook = "0.1"
 wasm-bindgen = "0.2"
 getrandom = { version = "0.3", features = ["wasm_js"] }
+bevy_embedded_assets = "0.10"
 
 [profile.release]
 opt-level = "z"
